@@ -1,0 +1,7 @@
+node_modules/
+boot-out.log
+boot-err.log
+*.log
+dist/
+out/
+.DS_Store

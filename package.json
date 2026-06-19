@@ -1,0 +1,18 @@
+{
+  "name": "kinetix-studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Kinetix Studio - AI-native, multi-process desktop video editor (MVP)",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "mcp": "node electron/mcp/server.js",
+    "mcp:selftest": "node electron/mcp/server.js --selftest",
+    "test": "node scripts/test-core.js && node scripts/test-mcp.js",
+    "test:core": "node scripts/test-core.js",
+    "test:mcp": "node scripts/test-mcp.js"
+  },
+  "devDependencies": {
+    "electron": "^42.4.1"
+  }
+}

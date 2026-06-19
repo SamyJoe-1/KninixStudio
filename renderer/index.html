@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' file: data: blob:; media-src 'self' file: blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self';" />
+  <title>Kinetix Studio</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="logo">◢◣</span><span class="title">Kinetix</span></div>
+    <div class="actions">
+      <button id="btnSplit" class="btn" title="Split selected clip at playhead (S)">✂ Split</button>
+      <button id="btnDup" class="btn" title="Duplicate selection (Ctrl+D)">⧉ Duplicate</button>
+      <button id="btnDel" class="btn" title="Delete selection (Del)">🗑 Delete</button>
+      <span class="sep"></span>
+      <button id="btnUndo" class="btn ghost" disabled title="Undo (Ctrl+Z)">↶</button>
+      <button id="btnRedo" class="btn ghost" disabled title="Redo (Ctrl+Y)">↷</button>
+      <span class="grow"></span>
+      <span class="fps">UI <b id="fps">60</b> fps</span>
+      <button id="btnExport" class="btn accent">⬇ Export</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- LEFT: sections sidebar -->
+    <section class="panel sidebar">
+      <div class="tabs" id="tabs"></div>
+      <div class="section-body" id="sectionBody"></div>
+    </section>
+
+    <!-- CENTER: preview + transport + timeline -->
+    <section class="stage">
+      <div class="viewport" id="viewport">
+        <video id="vid" playsinline></video>
+        <canvas id="overlay" width="1280" height="720"></canvas>
+        <div class="noclip" id="noclip">▶ Add a clip and press play</div>
+      </div>
+
+      <div class="transport">
+        <button id="btnPlay" class="btn round" title="Play / Pause (Space)">▶</button>
+        <button id="btnStop" class="btn round ghost" title="Stop">⏹</button>
+        <span class="time"><b id="tcur">0:00.0</b> / <span id="tdur">0:00.0</span></span>
+        <span class="grow"></span>
+        <span class="muted small">Zoom</span>
+        <input id="zoom" type="range" min="20" max="240" value="80" title="Timeline zoom" />
+      </div>
+
+      <div class="timeline" id="timeline">
+        <div class="ruler" id="ruler"></div>
+        <div class="tracks" id="tracks"></div>
+        <div class="playhead" id="playhead"></div>
+      </div>
+    </section>
+
+    <!-- RIGHT: inspector + jobs -->
+    <section class="panel inspector">
+      <h2>Inspector</h2>
+      <div id="inspector" class="insp-body"><p class="muted small">Select a clip or an object to edit it.</p></div>
+      <h2 class="jobs-h">Layers <span id="layerCount" class="muted">0</span></h2>
+      <div id="layerList" class="layer-list"></div>
+      <h2 class="jobs-h">Jobs <span id="jobActive" class="muted">0</span>
+        <button id="btnClearJobs" class="btn ghost tiny">clear</button></h2>
+      <div id="jobList" class="job-list"></div>
+    </section>
+  </main>
+
+  <footer class="statusbar">
+    <span id="status">Ready.</span>
+    <span class="grow"></span>
+    <span class="muted">Claude/MCP: <code>npm run mcp</code> · same project</span>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
