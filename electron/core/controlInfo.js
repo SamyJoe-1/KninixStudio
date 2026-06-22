@@ -6,7 +6,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
-const CONTROL_FILE = path.join(os.tmpdir(), 'kinetix-studio', 'kx-control.json');
+const CONTROL_FILE = path.join(os.tmpdir(), 'Kninix-studio', 'kx-control.json');
 
 function writeControlInfo(info) {
   fs.mkdirSync(path.dirname(CONTROL_FILE), { recursive: true });

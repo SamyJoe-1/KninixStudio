@@ -1,6 +1,5 @@
 node_modules/
-boot-out.log
-boot-err.log
+logs/
 *.log
 dist/
 out/

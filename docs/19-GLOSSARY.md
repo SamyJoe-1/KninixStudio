@@ -4,7 +4,7 @@ Shared vocabulary so docs, design, and engineering mean the same thing. Terms gr
 
 ## Product / project terms
 
-- **Kinetix Studio** — working product name (placeholder; see [01](01-VISION-AND-POSITIONING.md#naming)).
+- **Kninix Studio** — working product name (placeholder; see [01](01-VISION-AND-POSITIONING.md#naming)).
 - **Cue** — the AI copilot persona (Claude via MCP) that performs reversible edits ([09](09-AI-FEATURES.md), [10](10-MCP-INTEGRATION.md)).
 - **Progressive Pro** — one UI that scales from CapCut-simple to AE-deep via a Pro toggle/contextual reveals ([07](07-UI-UX-DESIGN-SYSTEM.md)).
 - **Wedge / hero flow** — the "one-shot social pass" (Flow A): raw footage → captioned, silence-cut, multi-aspect Short ([09](09-AI-FEATURES.md), [13](13-MVP-SCOPE.md)).
@@ -16,8 +16,8 @@ Shared vocabulary so docs, design, and engineering mean the same thing. Terms gr
 
 ## File / data terms
 
-- **`.kxp`** — Kinetix Project: open, versioned, diffable project container ([11](11-PROJECT-FILE-FORMAT-DATA-MODEL.md)).
-- **`.kxt`** — Kinetix Template: a reusable motion-graphics template (a profile of `.kxp` with exposed params) ([08](08-MOTION-GRAPHICS-ENGINE.md)).
+- **`.kxp`** — Kninix Project: open, versioned, diffable project container ([11](11-PROJECT-FILE-FORMAT-DATA-MODEL.md)).
+- **`.kxt`** — Kninix Template: a reusable motion-graphics template (a profile of `.kxp` with exposed params) ([08](08-MOTION-GRAPHICS-ENGINE.md)).
 - **document.json** — the canonical timeline graph; single source of truth ([11](11-PROJECT-FILE-FORMAT-DATA-MODEL.md)).
 - **Timebase** — rational frame rate (`fps`/`scale`) giving frame-accurate, drift-free time ([11](11-PROJECT-FILE-FORMAT-DATA-MODEL.md)).
 - **Media index** — mapping of media IDs to file paths + hashes for linking/relink ([11](11-PROJECT-FILE-FORMAT-DATA-MODEL.md)).

@@ -1,4 +1,4 @@
-# Kinetix Studio — Running the MVP
+# Kninix Studio — Running the MVP
 
 A **desktop** video editor (Electron + Node) built for the priorities you set:
 **function over UI, buttery smooth, and genuinely multi-process** — the UI never
@@ -27,7 +27,7 @@ First launch downloads the Electron binary once (be patient ~1 min). A dark edit
 3. Press **▶ / Space** → the clip **plays in the preview**; the playhead moves. Click the **ruler** to scrub.
 4. **Click a clip** to select it (highlights, Inspector opens). **Drag** its body to move it; **drag its edges** to trim. **✂ Split** (or `S`) cuts it at the playhead. `Delete` removes it.
 5. **＋ Text / ▭ Rect / ◯ Ellipse** add objects on the canvas. Click one in the preview to **select**, **drag** to move, drag the blue **handles** to resize; edit text/color/size in the Inspector. Objects also appear on the **Text/Shapes** timeline lane.
-6. **⬇ Export** → stitches the timeline to an MP4 in `Videos/KinetixExports`.
+6. **⬇ Export** → stitches the timeline to an MP4 in `Videos/KninixExports`.
 
 > Background work (probe, thumbnails, export, demo-clip generation) runs in **separate
 > `ffmpeg` processes** — the `UI … fps` meter top-right stays green even mid-export, which

@@ -1,6 +1,6 @@
-# Kinetix Studio
+# Kninix Studio
 
-> **Working name:** Kinetix Studio · **Codename:** Aurora · **AI Copilot:** "Cue" (powered by Claude via MCP)
+> **Working name:** Kninix Studio · **Codename:** Aurora · **AI Copilot:** "Cue" (powered by Claude via MCP)
 >
 > A pro-grade, AI-native, privacy-first video editor and motion-graphics suite built to out-class CapCut on craft, control, and trust — while staying as fast and friendly to start as CapCut is.
 
@@ -8,13 +8,13 @@
 
 ## The one-paragraph pitch
 
-CapCut won the world by being *free, fast, and friendly*. It loses on *control, ownership, privacy, and pro motion design*. **Kinetix Studio** keeps the 60-second onboarding and "it just works" templates, then adds a real keyframe/graph-editor motion engine (After-Effects-class), a GPU compositor for true real-time preview, a **local-first** project model you actually own, and a first-class **MCP integration** that turns Claude into a hands-on editing copilot ("Cue") that can cut, caption, color, and animate by instruction. You get the easy button *and* the pro panel — without sending your footage to someone else's cloud unless you ask.
+CapCut won the world by being *free, fast, and friendly*. It loses on *control, ownership, privacy, and pro motion design*. **Kninix Studio** keeps the 60-second onboarding and "it just works" templates, then adds a real keyframe/graph-editor motion engine (After-Effects-class), a GPU compositor for true real-time preview, a **local-first** project model you actually own, and a first-class **MCP integration** that turns Claude into a hands-on editing copilot ("Cue") that can cut, caption, color, and animate by instruction. You get the easy button *and* the pro panel — without sending your footage to someone else's cloud unless you ask.
 
 ---
 
 ## Why this can win (the wedge)
 
-| Axis | CapCut today | Kinetix Studio |
+| Axis | CapCut today | Kninix Studio |
 |---|---|---|
 | Onboarding speed | Excellent | Match it (templates + auto-everything) |
 | Pro motion graphics | Shallow (no graph editor, weak keyframing) | **Deep** — graph editor, expressions, shape layers, mattes |
@@ -61,7 +61,7 @@ Start here → **[docs/00-INDEX.md](docs/00-INDEX.md)**
 
 ## Naming (decide later)
 
-Working name **Kinetix Studio** is a placeholder. Candidates to A/B test: *Kinetix, Lumio, Clypse, MotionForge, Cutline, Kino, Vortex*. The AI copilot persona is **"Cue."** Final naming/branding is parked in [01-VISION](docs/01-VISION-AND-POSITIONING.md#naming).
+Working name **Kninix Studio** is a placeholder. Candidates to A/B test: *Kninix, Lumio, Clypse, MotionForge, Cutline, Kino, Vortex*. The AI copilot persona is **"Cue."** Final naming/branding is parked in [01-VISION](docs/01-VISION-AND-POSITIONING.md#naming).
 
 ## Status
 

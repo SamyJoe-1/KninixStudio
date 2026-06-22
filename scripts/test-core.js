@@ -34,7 +34,7 @@ function waitIdle(engine, { debounce = 350, timeout = 180000 } = {}) {
 }
 
 (async () => {
-  console.log('== Kinetix core test ==');
+  console.log('== Kninix core test ==');
   const engine = new Engine();
 
   // --- 1. concurrency: fire 3 sample jobs at once ---

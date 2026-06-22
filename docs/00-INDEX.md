@@ -1,6 +1,6 @@
 # 00 — Index & Reading Guide
 
-This is the planning package for **Kinetix Studio** (codename *Aurora*), an AI-native video editor + motion-graphics suite designed to compete with and surpass CapCut, with a polished GUI and deep **MCP** integration so Claude ("Cue") can act as a hands-on editing copilot.
+This is the planning package for **Kninix Studio** (codename *Aurora*), an AI-native video editor + motion-graphics suite designed to compete with and surpass CapCut, with a polished GUI and deep **MCP** integration so Claude ("Cue") can act as a hands-on editing copilot.
 
 > **Phase:** Planning only. No code is written yet — by design. These documents are the contract we build against.
 

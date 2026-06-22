@@ -1,5 +1,5 @@
 'use strict';
-// Kinetix editor front end. Preview plays an ffmpeg H.264 proxy (any codec works).
+// Kninix editor front end. Preview plays an ffmpeg H.264 proxy (any codec works).
 // Sections sidebar (Media/Text/Shapes/Widgets/Sticker/Filters/Audio), a clickable/
 // draggable/trimmable timeline with zoom, a canvas for text+shapes+widgets with IN/OUT
 // animations, a Layers panel (z-order/visibility/lock), marquee multi-select, and clip

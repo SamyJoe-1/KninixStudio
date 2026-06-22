@@ -1,5 +1,5 @@
 'use strict';
-// Kinetix Studio MCP server (stdio, JSON-RPC 2.0, newline-delimited).
+// Kninix Studio MCP server (stdio, JSON-RPC 2.0, newline-delimited).
 // Exposes the editor as MCP *tools* + *resources* so Claude ("Cue") can drive the
 // SAME project the GUI shows. Tool calls are forwarded to the running app's local
 // control server (docs/10). Zero npm deps — the protocol is implemented directly.
@@ -11,7 +11,7 @@ const http = require('http');
 const readline = require('readline');
 const { readControlInfo } = require('../core/controlInfo');
 
-const SERVER_INFO = { name: 'kinetix-studio', version: '0.1.0' };
+const SERVER_INFO = { name: 'Kninix-studio', version: '0.1.0' };
 const PROTOCOL_VERSION = '2024-11-05';
 
 // ---- tool catalogue (maps 1:1 onto engine.dispatch methods) ----
@@ -126,7 +126,7 @@ const RESOURCES = [
 function controlRpc(method, params) {
   return new Promise((resolve, reject) => {
     const info = readControlInfo();
-    if (!info) return reject(new Error('Kinetix Studio is not running (no control server found). Launch the app first.'));
+    if (!info) return reject(new Error('Kninix Studio is not running (no control server found). Launch the app first.'));
     const body = JSON.stringify({ method, params: params || {} });
     const req = http.request(
       { host: '127.0.0.1', port: info.port, path: '/rpc', method: 'POST',
@@ -224,7 +224,7 @@ function startStdioLoop() {
     catch { return send({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }); }
     send(await handleMessage(msg));
   });
-  process.stderr.write('[kinetix-mcp] ready on stdio\n');
+  process.stderr.write('[Kninix-mcp] ready on stdio\n');
 }
 
 // ---- self-test: in-process engine, exercise the protocol end-to-end ----

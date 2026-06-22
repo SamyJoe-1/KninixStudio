@@ -19,7 +19,7 @@ class Engine extends EventEmitter {
     super();
     this.project = new Project();
     this.jobs = new JobManager({ maxConcurrent: opts.maxConcurrent || 4 });
-    this.dataDir = opts.dataDir || path.join(os.tmpdir(), 'kinetix-studio');
+    this.dataDir = opts.dataDir || path.join(os.tmpdir(), 'Kninix-studio');
     this.thumbDir = path.join(this.dataDir, 'thumbs');
     this.sampleDir = path.join(this.dataDir, 'samples');
     this.proxyDir = path.join(this.dataDir, 'proxies');

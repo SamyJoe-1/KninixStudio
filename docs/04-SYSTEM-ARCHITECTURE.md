@@ -11,7 +11,7 @@
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│                         KINETIX STUDIO (desktop app)                   │
+│                         Kninix STUDIO (desktop app)                   │
 │                                                                        │
 │  ┌───────────────────────────┐      ┌──────────────────────────────┐  │
 │  │        UI LAYER            │      │      CUE / AI LAYER           │  │
@@ -138,7 +138,7 @@ Every AI action is **proposed → applied → reversible**, and visible in the e
 ## Extensibility
 
 - **Plugins** run in a sandboxed host: effect plugins (WGSL + params schema), panel plugins (web UI), exporter plugins. Capability-scoped, no raw FS by default.
-- **MCP tools** are the same surface third-party copilots/agents can use (documented). This makes Kinetix *automatable*, not just AI-assisted.
+- **MCP tools** are the same surface third-party copilots/agents can use (documented). This makes Kninix *automatable*, not just AI-assisted.
 
 ## Failure & recovery
 

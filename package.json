@@ -1,8 +1,8 @@
 {
-  "name": "kinetix-studio",
+  "name": "Kninix-studio",
   "version": "0.1.0",
   "private": true,
-  "description": "Kinetix Studio - AI-native, multi-process desktop video editor (MVP)",
+  "description": "Kninix Studio - AI-native, multi-process desktop video editor (MVP)",
   "main": "electron/main.js",
   "scripts": {
     "start": "electron .",

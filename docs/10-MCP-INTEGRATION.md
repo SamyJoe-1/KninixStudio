@@ -1,19 +1,19 @@
 # 10 — MCP Integration (Claude as a hands-on editing copilot)
 
-> This is the headline architectural feature: a **Model Context Protocol (MCP)** server that exposes Kinetix's editing capabilities as **tools** and the project state as **resources**, so **Claude ("Cue") can actually perform edits** — and so third-party agents/automation can drive the editor too. The same command layer powers the GUI and MCP ([04](04-SYSTEM-ARCHITECTURE.md)), guaranteeing AI edits are as powerful and reversible as human ones.
+> This is the headline architectural feature: a **Model Context Protocol (MCP)** server that exposes Kninix's editing capabilities as **tools** and the project state as **resources**, so **Claude ("Cue") can actually perform edits** — and so third-party agents/automation can drive the editor too. The same command layer powers the GUI and MCP ([04](04-SYSTEM-ARCHITECTURE.md)), guaranteeing AI edits are as powerful and reversible as human ones.
 
 ## What MCP gives us
 
 - **Cue can *do*, not just *say*.** Instead of describing how to cut silence, Cue calls `timeline.remove_ranges` and it happens — reversibly.
 - **One surface, two consumers.** Tools map to core Commands; GUI and AI share them. No "AI-only" half-baked path.
-- **Automatable & extensible.** External MCP clients (other agents, scripts, CI for video) can attach to a project. Kinetix becomes *programmable*.
+- **Automatable & extensible.** External MCP clients (other agents, scripts, CI for video) can attach to a project. Kninix becomes *programmable*.
 - **Auditable & safe.** A single chokepoint to enforce consent, rate limits, validation, and an action log.
 
 ## Topology
 
 ```
 ┌────────────┐   MCP (stdio/ws)   ┌────────────────────┐   IPC    ┌──────────────────┐
-│  Claude /   │◄──────────────────►│  KINETIX MCP SERVER │◄────────►│  CORE COMMAND     │
+│  Claude /   │◄──────────────────►│  Kninix MCP SERVER │◄────────►│  CORE COMMAND     │
 │  Cue client │   tools/resources  │  (local sidecar)    │ commands │  DOCUMENT (Rust)  │
 └────────────┘                     │  • tool registry    │          │  validate+apply+  │
         ▲                          │  • consent gate     │          │  undo + diffs     │
@@ -146,7 +146,7 @@ The MCP server can also expose **prompt templates** ("skills") — e.g., *"socia
 
 ## Why this beats CapCut's AI
 
-| | CapCut AI | Kinetix + MCP |
+| | CapCut AI | Kninix + MCP |
 |---|---|---|
 | Awareness | per-feature | whole-project (resources) |
 | Action | fixed buttons | composable tools → any workflow |

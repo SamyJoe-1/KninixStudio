@@ -28,7 +28,7 @@ Your media stays on your machine by default. The project file (`.kxp`) is an **o
 ## Positioning statement
 
 > **For** creators and small teams who have outgrown CapCut but don't want After Effects,
-> **Kinetix Studio is** an AI-native video & motion-graphics editor
+> **Kninix Studio is** an AI-native video & motion-graphics editor
 > **that** delivers pro depth with a friendly UI and an AI copilot that actually does the work,
 > **unlike** CapCut (shallow, cloud-leaning, paywall-creeping) and Premiere/AE (powerful but punishing),
 > **because** we pair a real motion engine with a conversational copilot and a local-first, own-your-work model.
@@ -56,24 +56,24 @@ Explicitly **not** day-one targets: Hollywood color finishing (DaVinci's turf), 
 
 ## <a name="naming"></a>Naming (open)
 
-Working name: **Kinetix Studio**. The product needs a name that signals *motion + intelligence + ownership*, is short, pronounceable globally, and has trademark + domain headroom.
+Working name: **Kninix Studio**. The product needs a name that signals *motion + intelligence + ownership*, is short, pronounceable globally, and has trademark + domain headroom.
 
 | Candidate | Read | Risk |
 |---|---|---|
-| **Kinetix** | motion/energy | possible TM collisions in tech |
+| **Kninix** | motion/energy | possible TM collisions in tech |
 | **Lumio** | light/clarity | generic-ish |
 | **Clypse** | "clip" + eclipse | spelling friction |
 | **MotionForge** | descriptive, pro | long |
 | **Cutline** | editorial, crisp | journalism term |
 | **Kino** | film heritage | very common word |
 
-**Decision:** parked. Run trademark + domain + app-store name search before MVP marketing. Use "Kinetix Studio" internally until then. AI copilot persona **"Cue"** is retained regardless of product name.
+**Decision:** parked. Run trademark + domain + app-store name search before MVP marketing. Use "Kninix Studio" internally until then. AI copilot persona **"Cue"** is retained regardless of product name.
 
 ## What "beating CapCut" concretely means (success definition)
 
 We are not trying to beat CapCut's *install count* in year one. We win by being the obvious upgrade:
 
-1. **Craft win:** a motion designer can build something in Kinetix they *cannot* build in CapCut.
+1. **Craft win:** a motion designer can build something in Kninix they *cannot* build in CapCut.
 2. **Speed win:** a creator finishes a routine reel at least as fast as CapCut, with Cue doing the grunt work.
 3. **Trust win:** a privacy-conscious creator chooses us *because* of local-first + no watermark.
 4. **Retention win:** WEPAC and 7-day retention beat CapCut benchmarks within the target segment.

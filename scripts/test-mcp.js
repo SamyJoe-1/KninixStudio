@@ -14,7 +14,7 @@ let failures = 0;
 const assert = (c, m) => { console.log((c ? '  ✓ ' : '  ✗ ') + m); if (!c) failures++; };
 
 (async () => {
-  console.log('== Kinetix MCP end-to-end test ==');
+  console.log('== Kninix MCP end-to-end test ==');
 
   // 1. Stand up a live engine + control server (simulating the running app).
   const engine = new Engine();
@@ -42,7 +42,7 @@ const assert = (c, m) => { console.log((c ? '  ✓ ' : '  ✗ ') + m); if (!c) f
 
   // 3. Drive the protocol.
   const init = await send('initialize', { protocolVersion: '2024-11-05' });
-  assert(init.result && init.result.serverInfo.name === 'kinetix-studio', 'initialize handshake');
+  assert(init.result && init.result.serverInfo.name === 'Kninix-studio', 'initialize handshake');
 
   const tools = await send('tools/list', {});
   assert(tools.result.tools.length === 25, 'tools/list returns 25 tools (' + tools.result.tools.length + ')');

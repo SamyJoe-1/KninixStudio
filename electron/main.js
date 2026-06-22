@@ -18,12 +18,12 @@ if (!app.requestSingleInstanceLock()) { app.quit(); }
 app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
 
 async function createWindow() {
-  const exportsDir = path.join(app.getPath('videos') || app.getPath('downloads') || app.getPath('home'), 'KinetixExports');
+  const exportsDir = path.join(app.getPath('videos') || app.getPath('downloads') || app.getPath('home'), 'KninixExports');
   engine = new Engine({ outDir: exportsDir, maxConcurrent: 4 });
 
   const ctl = await startControlServer(engine, {});
   writeControlInfo({ port: ctl.port, token: ctl.token, pid: process.pid });
-  console.log(`[kinetix] control server on 127.0.0.1:${ctl.port}`);
+  console.log(`[Kninix] control server on 127.0.0.1:${ctl.port}`);
 
   win = new BrowserWindow({
     width: 1320,
@@ -31,7 +31,7 @@ async function createWindow() {
     minWidth: 1040,
     minHeight: 680,
     backgroundColor: '#0E0F12',
-    title: 'Kinetix Studio',
+    title: 'Kninix Studio',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

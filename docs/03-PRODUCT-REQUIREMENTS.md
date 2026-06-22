@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define *what* Kinetix Studio does, for *whom*, and *why*, at a level that engineering ([04](04-SYSTEM-ARCHITECTURE.md)) and design ([07](07-UI-UX-DESIGN-SYSTEM.md)) can build against. Scope/sequencing lives in [12-Roadmap](12-ROADMAP-MILESTONES.md) and [13-MVP](13-MVP-SCOPE.md).
+Define *what* Kninix Studio does, for *whom*, and *why*, at a level that engineering ([04](04-SYSTEM-ARCHITECTURE.md)) and design ([07](07-UI-UX-DESIGN-SYSTEM.md)) can build against. Scope/sequencing lives in [12-Roadmap](12-ROADMAP-MILESTONES.md) and [13-MVP](13-MVP-SCOPE.md).
 
 ## Personas
 
