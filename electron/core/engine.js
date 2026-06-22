@@ -128,6 +128,7 @@ class Engine extends EventEmitter {
       case 'add_clip': { const c = this.project.addClip(p); this._changed(); return c; }
       case 'move_clip': { const c = this.project.moveClip(p); this._changed(); return c; }
       case 'trim_clip': { const c = this.project.trimClip(p); this._changed(); return c; }
+      case 'update_clip': { const c = this.project.updateClip(p); this._changed(); return c; }
       case 'split_clip': { const r = this.project.splitClip(p); this._changed(); return r; }
       case 'remove_clip': { const r = this.project.removeClip(p); this._changed(); return r; }
       case 'add_object': { const o = this.project.addObject(p); this._changed(); return o; }
@@ -139,6 +140,7 @@ class Engine extends EventEmitter {
 
       case 'add_marker': { const m = this.project.addMarker(p); this._changed(); return m; }
       case 'set_playhead': { const t = this.project.setPlayhead(p.at); this._changed(); return t; }
+      case 'set_resolution': { const r = this.project.setResolution(p); this._changed(); return r; }
 
       case 'export': return this.exportProject(p);
       case 'undo': { const r = this.project.undo(); this._changed(); return r; }

@@ -15,9 +15,11 @@ class Project {
     this.resolution = { w: 1280, h: 720 };
     this.fps = 30;
     this.media = {}; // id -> media object
+    // Generic, numbered tracks (Camtasia-style). Array order = stack order: the LAST
+    // track is the front-most (drawn on top). `kind` is kept internal only so the
+    // exporter/tests can still find a base video track — the UI just shows "Track N".
     this.tracks = [
-      { id: 'trk_v1', kind: 'video', name: 'V1', clips: [] },
-      { id: 'trk_a1', kind: 'audio', name: 'A1', clips: [] },
+      { id: 'trk_1', kind: 'video', name: 'Track 1', clips: [] },
     ];
     this.objects = []; // canvas overlays: { id, type:text|rect|ellipse, x,y,w,h, ... , start,end }
     this.markers = [];
@@ -95,7 +97,8 @@ class Project {
   addTrack(kind, name) {
     this._checkpoint();
     const id = uid('trk');
-    this.tracks.push({ id, kind: kind || 'video', name: name || `${(kind || 'V').toUpperCase()}${this.tracks.length}`, clips: [] });
+    // Generic numbered track added on top of the stack.
+    this.tracks.push({ id, kind: kind || 'video', name: name || `Track ${this.tracks.length + 1}`, clips: [] });
     return id;
   }
 
@@ -121,6 +124,9 @@ class Project {
       timelineOut: +(start + dur).toFixed(3),
       sourceIn: 0,
       sourceOut: +dur.toFixed(3),
+      // canvas placement (export-pixel space). Default = fill the whole export frame.
+      rect: { x: 0, y: 0, w: this.resolution.w, h: this.resolution.h },
+      opacity: 1,
     };
     track.clips.push(clip);
     track.clips.sort((a, b) => a.timelineIn - b.timelineIn);
@@ -151,7 +157,8 @@ class Project {
     if (!f) throw new Error('No such clip: ' + clipId);
     this._checkpoint();
     const media = this.media[f.clip.mediaId];
-    const maxDur = media ? media.duration : Infinity;
+    // Stills have no real length — they can be stretched to any duration on the timeline.
+    const maxDur = (media && !media.isImage) ? media.duration : Infinity;
     const si = Math.max(0, sourceIn != null ? sourceIn : f.clip.sourceIn);
     const so = Math.min(maxDur, sourceOut != null ? sourceOut : f.clip.sourceOut);
     if (so <= si) throw new Error('Invalid trim (out <= in)');
@@ -172,6 +179,8 @@ class Project {
       id: uid('clp'), mediaId: c.mediaId, name: c.name,
       timelineIn: +at.toFixed(3), timelineOut: c.timelineOut,
       sourceIn: +splitSource.toFixed(3), sourceOut: c.sourceOut,
+      rect: Object.assign({ x: 0, y: 0, w: this.resolution.w, h: this.resolution.h }, c.rect),
+      opacity: c.opacity != null ? c.opacity : 1,
     };
     c.timelineOut = +at.toFixed(3);
     c.sourceOut = +splitSource.toFixed(3);
@@ -192,14 +201,17 @@ class Project {
   // type 'text'  -> { text, fontSize, color, align }
   // anything else -> a shape; the shape kind lives in `shape`
   //   (rect, roundrect, ellipse, triangle, diamond, star, pentagon, hexagon, heart, arrow, line, ring)
-  addObject({ type = 'text', shape, widget, x, y, w, h, text, subtitle, color, fontSize, start, end, align, radius } = {}) {
+  addObject({ type = 'text', shape, widget, x, y, w, h, text, subtitle, color, fontSize, start, end, align, radius, trackId } = {}) {
     this._checkpoint();
     const W = this.resolution.w, H = this.resolution.h;
     const common = {
       id: uid('obj'), opacity: 1, rotation: 0, hidden: false, locked: false,
+      trackId: trackId || null,   // which numbered track this overlay lives on
       animIn: { type: 'none', dur: 0.5 }, animOut: { type: 'none', dur: 0.5 },
+      // Non-AV elements (text/shape/emoji/widget) are MEDIA too — they get a short
+      // 3s default block on the timeline (NOT the whole video), freely resizable.
       start: start != null ? start : 0,
-      end: end != null ? end : Math.max(5, this.duration() || 5),
+      end: end != null ? end : (start != null ? start : 0) + 3,
     };
     let obj;
     if (type === 'text') {
@@ -258,6 +270,16 @@ class Project {
     return f.clip;
   }
 
+  // Update a clip's canvas placement / opacity (and other simple fields).
+  updateClip({ clipId, patch } = {}) {
+    const f = this.findClip(clipId);
+    if (!f) throw new Error('No such clip: ' + clipId);
+    this._checkpoint();
+    if (patch && patch.rect) f.clip.rect = Object.assign({}, f.clip.rect, patch.rect);
+    if (patch && patch.opacity != null) f.clip.opacity = patch.opacity;
+    return f.clip;
+  }
+
   setClipFilter({ clipId, filter } = {}) {
     const f = this.findClip(clipId);
     if (!f) throw new Error('No such clip: ' + clipId);
@@ -293,6 +315,15 @@ class Project {
   }
 
   setPlayhead(t) { this.playhead = Math.max(0, +Number(t || 0).toFixed(3)); return this.playhead; }
+
+  // ---- frame / canvas ----
+  setResolution({ w, h } = {}) {
+    const W = Math.max(16, Math.round(w || this.resolution.w));
+    const H = Math.max(16, Math.round(h || this.resolution.h));
+    this._checkpoint();
+    this.resolution = { w: W, h: H };
+    return this.resolution;
+  }
 }
 
 module.exports = { Project, uid };

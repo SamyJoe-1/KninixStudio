@@ -31,10 +31,23 @@
 
     <!-- CENTER: preview + transport + timeline -->
     <section class="stage">
+      <!-- Export window: resolution / aspect-ratio bar -->
+      <div class="resbar">
+        <span class="muted small">Export</span>
+        <select id="resProfile" title="Export window size / aspect ratio"></select>
+        <span class="resdim"><input id="resW" type="number" min="16" title="Width"> × <input id="resH" type="number" min="16" title="Height"></span>
+        <span class="ratio-tag" id="ratioTag">16:9</span>
+        <span class="grow"></span>
+        <span class="muted small">Bright area = what exports · dimmed = cropped out</span>
+      </div>
+
       <div class="viewport" id="viewport">
-        <video id="vid" playsinline></video>
-        <canvas id="overlay" width="1280" height="720"></canvas>
-        <div class="noclip" id="noclip">▶ Add a clip and press play</div>
+        <div class="frame" id="frame">
+          <video id="vid" playsinline></video>
+          <canvas id="overlay" width="1280" height="720"></canvas>
+          <div class="cropwin" id="cropwin"></div>
+          <div class="noclip" id="noclip">▶ Add a clip and press play</div>
+        </div>
       </div>
 
       <div class="transport">
@@ -42,26 +55,29 @@
         <button id="btnStop" class="btn round ghost" title="Stop">⏹</button>
         <span class="time"><b id="tcur">0:00.0</b> / <span id="tdur">0:00.0</span></span>
         <span class="grow"></span>
+        <button id="btnFit" class="btn ghost tiny" title="Zoom to fit the whole project">⤢ Fit</button>
         <span class="muted small">Zoom</span>
-        <input id="zoom" type="range" min="20" max="240" value="80" title="Timeline zoom" />
+        <input id="zoom" type="range" min="0" max="100" value="60" step="0.5" title="Timeline zoom (zoom way out for long media, in for detail)" />
       </div>
 
+      <div class="tl-head">
+        <span class="muted small">Tracks — top row is front-most · click a track to make it active</span>
+        <span class="grow"></span>
+        <button class="btn accent tiny" id="btnAddTrack" title="Add a new track on top">＋ Track</button>
+      </div>
       <div class="timeline" id="timeline">
         <div class="ruler" id="ruler"></div>
         <div class="tracks" id="tracks"></div>
-        <div class="playhead" id="playhead"></div>
+        <div class="playhead" id="playhead"><div class="ph-handle" id="phHandle"></div></div>
       </div>
     </section>
 
-    <!-- RIGHT: inspector + jobs -->
+    <!-- RIGHT: inspector + layers -->
     <section class="panel inspector">
       <h2>Inspector</h2>
       <div id="inspector" class="insp-body"><p class="muted small">Select a clip or an object to edit it.</p></div>
       <h2 class="jobs-h">Layers <span id="layerCount" class="muted">0</span></h2>
       <div id="layerList" class="layer-list"></div>
-      <h2 class="jobs-h">Jobs <span id="jobActive" class="muted">0</span>
-        <button id="btnClearJobs" class="btn ghost tiny">clear</button></h2>
-      <div id="jobList" class="job-list"></div>
     </section>
   </main>
 

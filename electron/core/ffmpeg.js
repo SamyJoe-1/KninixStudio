@@ -63,16 +63,24 @@ async function ffprobe(file) {
     const [n, d] = v.r_frame_rate.split('/').map(Number);
     if (d) fps = +(n / d).toFixed(3);
   }
+  // A still image: a video stream but no real timebase (no format duration, no audio).
+  // Also catch it by extension so PNG/JPG/etc. are always treated as stills.
+  const byExt = /\.(png|jpe?g|gif|webp|bmp|tiff?)$/i.test(file);
+  const isImage = !!v && !a && (byExt || !(duration > 0));
+  // Stills have no intrinsic length — give them a default 5s block (Camtasia-style),
+  // freely extendable on the timeline (trimClip lets images grow past this).
+  const IMAGE_DEFAULT = 5;
   return {
     path: file,
     name: path.basename(file),
-    duration: +Number(duration).toFixed(3),
+    duration: +Number(isImage ? IMAGE_DEFAULT : duration).toFixed(3),
     width: v ? v.width : 0,
     height: v ? v.height : 0,
     fps,
     hasVideo: !!v,
     hasAudio: !!a,
-    kind: v ? 'video' : (a ? 'audio' : 'video'),
+    isImage,
+    kind: isImage ? 'image' : (v ? 'video' : (a ? 'audio' : 'video')),
   };
 }
 
@@ -158,61 +166,106 @@ function extractPeaks(file, n = 240, { signal } = {}) {
 
 function clampTempo(s) { return Math.max(0.5, Math.min(2, s)); }
 
-// Export the primary video track honoring per-clip speed + loudness-normalize, scaling
-// to the project resolution, then concat. Real edits => these show up in the file.
+// Camtasia-style timeline compositor. ONE ffmpeg pass:
+//   * a black canvas spanning 0 -> total timeline length (gaps render as black),
+//   * every clip on EVERY track placed at its ABSOLUTE timelineIn (not concatenated),
+//   * higher tracks overlaid on top of lower ones,
+//   * stills looped for their on-timeline block length, videos trimmed to source in/out,
+//   * each clip's audio delayed to its start time and mixed over a silent bed.
+// Result: total duration = end of the last clip (NOT the sum), and "image at 4s for 10s
+// on track 2 with track 1 empty" exports a 14s video that is black 0->4 then the image.
 async function exportTimeline(project, outPath, { signal, onProgress } = {}) {
-  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'kx-export-'));
-  try {
-    const W = (project.resolution && project.resolution.w) || 1280;
-    const H = (project.resolution && project.resolution.h) || 720;
-    const vtrack = (project.tracks || []).find(t => t.kind === 'video');
-    const clips = vtrack ? [...vtrack.clips].sort((a, b) => a.timelineIn - b.timelineIn) : [];
-    if (!clips.length) throw new Error('Timeline has no video clips to export.');
+  const W = (project.resolution && project.resolution.w) || 1280;
+  const H = (project.resolution && project.resolution.h) || 720;
+  const tracks = project.tracks || [];
 
-    const totalSec = clips.reduce((s, c) => s + (c.sourceOut - c.sourceIn) / (c.speed || 1), 0);
-    let doneSec = 0;
-    const segPaths = [];
+  // Gather clips from every track. Track array order = stack order: index 0 is the
+  // bottom track, later tracks composite on top (matches the editor's drawOverlay).
+  const comp = [];
+  tracks.forEach((t, ti) => { for (const c of (t.clips || [])) {
+    const media = project.media[c.mediaId];
+    if (media) comp.push({ c, media, ti });
+  }});
+  if (!comp.length) throw new Error('Timeline is empty — add a clip before exporting.');
+  comp.sort((a, b) => (a.ti - b.ti) || (a.c.timelineIn - b.c.timelineIn));
 
-    for (let i = 0; i < clips.length; i++) {
-      if (signal && signal.aborted) throw new Error('aborted');
-      const c = clips[i];
-      const media = project.media[c.mediaId];
-      if (!media) throw new Error('Missing media for clip ' + c.id);
-      const speed = c.speed || 1;
-      const outDur = (c.sourceOut - c.sourceIn) / speed;
-      const seg = path.join(work, `seg_${i}.mp4`);
-      segPaths.push(seg);
+  // Total = end of the LAST clip on the timeline (gaps included), never the sum of clips.
+  const total = +Math.max(
+    project.duration ? project.duration() : 0,
+    ...comp.map(x => x.c.timelineOut)
+  ).toFixed(3);
+  if (total <= 0) throw new Error('Timeline has zero length.');
 
-      const args = ['-y', '-ss', String(c.sourceIn), '-to', String(c.sourceOut), '-i', media.path];
-      let vf = `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2,fps=30,format=yuv420p`;
-      if (speed !== 1) vf += `,setpts=PTS/${speed}`;
-      let af = '';
-      if (speed !== 1) af += `atempo=${clampTempo(speed)}`;
-      if (c.normalize) af += (af ? ',' : '') + 'loudnorm';
-
-      if (!media.hasAudio) {
-        args.push('-f', 'lavfi', '-t', String(outDur), '-i', 'anullsrc=r=44100:cl=stereo');
-        args.push('-map', '0:v:0', '-map', '1:a:0');
-      } else {
-        args.push('-map', '0:v:0', '-map', '0:a:0');
-      }
-      args.push('-vf', vf);
-      if (af && media.hasAudio) args.push('-af', af);
-      args.push('-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', '-ar', '44100', '-ac', '2', '-progress', 'pipe:1', '-nostats', seg);
-
-      const base = doneSec;
-      await run(FFMPEG, args, { signal, onLine: progressParser(outDur, (p) => { if (onProgress) onProgress((base + p * outDur) / totalSec, `clip ${i + 1}/${clips.length}`); }) });
-      doneSec += outDur;
+  const args = ['-y'];
+  // input 0: black canvas for the whole duration.
+  args.push('-f', 'lavfi', '-t', String(total), '-i', `color=c=black:s=${W}x${H}:r=30`);
+  // inputs 1..N: one per clip (stills looped, videos trimmed by source in/out).
+  comp.forEach(({ c, media }) => {
+    if (media.isImage) {
+      const blockDur = +(c.timelineOut - c.timelineIn).toFixed(3);
+      args.push('-loop', '1', '-t', String(Math.max(0.04, blockDur)), '-i', media.path);
+    } else {
+      args.push('-ss', String(c.sourceIn), '-to', String(c.sourceOut), '-i', media.path);
     }
+  });
+  // last input: a silent stereo bed spanning the whole timeline (so the mux always has audio).
+  const silenceIdx = comp.length + 1;
+  args.push('-f', 'lavfi', '-t', String(total), '-i', 'anullsrc=r=44100:cl=stereo');
 
-    const listFile = path.join(work, 'list.txt');
-    fs.writeFileSync(listFile, segPaths.map(p => `file '${p.replace(/\\/g, '/')}'`).join('\n'));
-    await run(FFMPEG, ['-y', '-f', 'concat', '-safe', '0', '-i', listFile, '-c', 'copy', outPath], { signal });
-    if (onProgress) onProgress(1, 'done');
-    return outPath;
-  } finally {
-    try { fs.rmSync(work, { recursive: true, force: true }); } catch (_) {}
+  const fc = [];
+  fc.push(`[0:v]fps=30,format=yuv420p[base]`);
+  let last = 'base';
+  const audioLabels = [];
+
+  comp.forEach(({ c, media }, k) => {
+    const idx = k + 1;
+    const rect = c.rect || { x: 0, y: 0, w: W, h: H };
+    const rw = Math.max(2, Math.round(rect.w)), rh = Math.max(2, Math.round(rect.h));
+    const rx = Math.round(rect.x), ry = Math.round(rect.y);
+    const speed = c.speed || 1;
+    const tin = +c.timelineIn.toFixed(3), tout = +c.timelineOut.toFixed(3);
+    // Fit-into-rect (letterbox with transparent pad) so lower layers show through the bars,
+    // then shift the clip's timestamps so it begins at its absolute timelineIn.
+    const shift = speed !== 1 ? `(PTS-STARTPTS)/${speed}+${tin}/TB` : `PTS-STARTPTS+${tin}/TB`;
+    fc.push(
+      `[${idx}:v]scale=${rw}:${rh}:force_original_aspect_ratio=decrease,` +
+      `pad=${rw}:${rh}:(ow-iw)/2:(oh-ih)/2:color=black@0,setsar=1,fps=30,` +
+      `format=yuva420p,setpts=${shift}[cv${k}]`
+    );
+    fc.push(
+      `[${last}][cv${k}]overlay=x=${rx}:y=${ry}:eof_action=pass:` +
+      `enable='between(t,${tin},${tout})'[ov${k}]`
+    );
+    last = `ov${k}`;
+    if (media.hasAudio) {
+      const ms = Math.max(0, Math.round(tin * 1000));
+      let a = `[${idx}:a]aresample=44100`;
+      if (speed !== 1) a += `,atempo=${clampTempo(speed)}`;
+      if (c.normalize) a += `,loudnorm`;
+      a += `,adelay=${ms}|${ms}[ca${k}]`;
+      fc.push(a);
+      audioLabels.push(`[ca${k}]`);
+    }
+  });
+
+  fc.push(`[${last}]format=yuv420p[vout]`);
+  let aout;
+  if (audioLabels.length) {
+    fc.push(`[${silenceIdx}:a]${audioLabels.join('')}amix=inputs=${audioLabels.length + 1}:normalize=0:dropout_transition=0[aout]`);
+    aout = '[aout]';
+  } else {
+    aout = `${silenceIdx}:a`;
   }
+
+  args.push('-filter_complex', fc.join(';'));
+  args.push('-map', '[vout]', '-map', aout, '-t', String(total));
+  args.push('-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
+            '-c:a', 'aac', '-ar', '44100', '-ac', '2',
+            '-movflags', '+faststart', '-progress', 'pipe:1', '-nostats', outPath);
+
+  await run(FFMPEG, args, { signal, onLine: onProgress ? progressParser(total, onProgress) : null });
+  if (onProgress) onProgress(1, 'done');
+  return outPath;
 }
 
 // Preview proxy: transcode ANY source to a browser-friendly H.264/yuv420p + AAC mp4 so
