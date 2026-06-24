@@ -5,10 +5,12 @@
 // commands and renders state/job events — which is what keeps the UI smooth.
 
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const pendingOverlay = new Map(); // id → { resolve, reject, timer }
 const path = require('path');
 const { Engine } = require('./core/engine');
 const { startControlServer } = require('./core/controlServer');
 const { writeControlInfo } = require('./core/controlInfo');
+const { startMcpHttpServer, MCP_HTTP_PORT } = require('./mcp/server');
 
 let win = null;
 let engine = null;
@@ -24,6 +26,10 @@ async function createWindow() {
   const ctl = await startControlServer(engine, {});
   writeControlInfo({ port: ctl.port, token: ctl.token, pid: process.pid });
   console.log(`[Kninix] control server on 127.0.0.1:${ctl.port}`);
+
+  // MCP HTTP+SSE server — fixed URL so Claude Desktop can always find it
+  startMcpHttpServer(engine, MCP_HTTP_PORT);
+  console.log(`[Kninix] MCP ready → http://127.0.0.1:${MCP_HTTP_PORT}/sse`);
 
   win = new BrowserWindow({
     width: 1320,
@@ -53,10 +59,38 @@ async function createWindow() {
   engine.on('state', s => { if (win && !win.isDestroyed()) win.webContents.send('state', s); });
   engine.on('job', j => { if (win && !win.isDestroyed()) win.webContents.send('job', j); });
 
+  // Hook renderer as overlay frame renderer for exports.
+  engine.setOverlayRenderer(({ fps, total, onProgress }) => new Promise((resolve, reject) => {
+    if (!win || win.isDestroyed()) return reject(new Error('No renderer'));
+    const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
+    const timer = setTimeout(() => {
+      pendingOverlay.delete(id);
+      reject(new Error('Overlay render timed out'));
+    }, 600_000);
+    pendingOverlay.set(id, { resolve, reject, timer, onProgress });
+    win.webContents.send('render-overlay', { id, fps, total });
+  }));
+
   win.on('closed', () => { win = null; });
 }
 
 // ---- IPC: the renderer's single command channel ----
+// Incremental progress while the renderer rasterises overlay frames.
+ipcMain.on('render-overlay-progress', (_e, { id, frac }) => {
+  const p = pendingOverlay.get(id);
+  if (p && p.onProgress) p.onProgress(frac);
+});
+
+// Receive rendered overlay frames from the renderer process.
+ipcMain.on('render-overlay-done', (_e, { id, result, error }) => {
+  const p = pendingOverlay.get(id);
+  if (!p) return;
+  clearTimeout(p.timer);
+  pendingOverlay.delete(id);
+  if (error) p.reject(new Error(error));
+  else p.resolve(result);
+});
+
 ipcMain.handle('rpc', async (_e, { method, params }) => {
   try { return { ok: true, result: await engine.dispatch(method, params) }; }
   catch (err) { return { ok: false, error: String((err && err.message) || err) }; }
@@ -68,6 +102,22 @@ ipcMain.handle('pick-file', async () => {
     filters: [{ name: 'Media', extensions: ['mp4', 'mov', 'mkv', 'webm', 'avi', 'm4v', 'mp3', 'wav', 'aac', 'm4a', 'jpg', 'jpeg', 'png'] }],
   });
   return r.canceled ? [] : r.filePaths;
+});
+
+ipcMain.handle('pick-project', async () => {
+  const r = await dialog.showOpenDialog(win, {
+    properties: ['openFile'],
+    filters: [{ name: 'Kninix Project', extensions: ['knx', 'json'] }],
+  });
+  return r.canceled ? null : r.filePaths[0];
+});
+
+ipcMain.handle('save-project-as', async () => {
+  const r = await dialog.showSaveDialog(win, {
+    defaultPath: 'Untitled.knx',
+    filters: [{ name: 'Kninix Project', extensions: ['knx'] }],
+  });
+  return r.canceled ? null : r.filePath;
 });
 
 ipcMain.handle('reveal', async (_e, p) => { if (p) shell.showItemInFolder(p); return true; });

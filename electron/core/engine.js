@@ -28,7 +28,11 @@ class Engine extends EventEmitter {
       fs.mkdirSync(d, { recursive: true });
     }
     this.jobs.on('update', job => this.emit('job', job));
+    this._overlayRenderer = null; // set by main.js after the window opens
   }
+
+  // main.js calls this once the renderer window is ready.
+  setOverlayRenderer(fn) { this._overlayRenderer = fn; }
 
   state() { return this.project.serialize(); }
   _changed() { this.emit('state', this.state()); }
@@ -95,14 +99,71 @@ class Engine extends EventEmitter {
     return { jobId, out };
   }
 
+  saveProjectFile(file) {
+    if (!file) throw new Error('No project file selected.');
+    const out = file.endsWith('.knx') ? file : file + '.knx';
+    fs.writeFileSync(out, JSON.stringify(this.project.exportData(), null, 2), 'utf8');
+    return { path: out };
+  }
+
+  loadProjectFile(file) {
+    if (!file || !fs.existsSync(file)) throw new Error('Project file not found: ' + file);
+    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const project = data.project || data;
+    this.project.loadSerialized(project);
+    this._changed();
+    return this.state();
+  }
+
   exportProject({ name } = {}) {
     const out = path.join(this.outDir, `${(name || 'export_' + Date.now()).replace(/[^\w.-]/g, '_')}.mp4`);
     const project = this.project;
+    const overlayRenderer = this._overlayRenderer;
     const jobId = this.jobs.submit({
       type: 'export',
       label: `Export · ${path.basename(out)}`,
       run: async ({ signal, onProgress }) => {
-        await ff.exportTimeline(project, out, { signal, onProgress });
+        // Rasterise the live preview overlay (captions/text/shapes/widgets) on an fps
+        // grid, so the export is pixel-identical to the editor. Falls back to FFmpeg
+        // filters only if there's no renderer attached.
+        let overlay = null;
+        const objects = (project.objects || []).filter(o => !o.hidden);
+        // total timeline length = end of the last clip or object.
+        let total = 0;
+        for (const t of (project.tracks || [])) for (const c of (t.clips || [])) total = Math.max(total, c.timelineOut || 0);
+        for (const o of objects) total = Math.max(total, o.end || 0);
+        total = +total.toFixed(3);
+
+        // Whole-export progress is split into two real phases so the bar reflects the
+        // full flow instead of sitting at 0% during caption rendering then jumping.
+        //   phase 1 (0 → OVERLAY_W): rasterising caption/overlay frames in the renderer
+        //   phase 2 (OVERLAY_W → 1): FFmpeg encoding the final video
+        const useOverlay = !!(overlayRenderer && objects.length && total > 0);
+        const OVERLAY_W = useOverlay ? 0.55 : 0;
+
+        if (useOverlay) {
+          onProgress(0, 'Rendering captions… 0%');
+          try {
+            const r = await overlayRenderer({
+              fps: 30, total,
+              onProgress: (frac) => onProgress(
+                Math.min(OVERLAY_W - 0.001, frac * OVERLAY_W),
+                'Rendering captions… ' + Math.round(frac * 100) + '%'
+              ),
+            });
+            if (r && r.frames && r.frames.length) overlay = r;
+          } catch (e) {
+            console.warn('[export] overlay renderer failed, using FFmpeg fallback:', e.message);
+          }
+        }
+
+        await ff.exportTimeline(project, out, {
+          signal, overlay,
+          onProgress: (frac, detail) => onProgress(
+            OVERLAY_W + (frac || 0) * (1 - OVERLAY_W),
+            'Encoding video… ' + Math.round((frac || 0) * 100) + '%'
+          ),
+        });
         return { out };
       },
     });
@@ -122,6 +183,8 @@ class Engine extends EventEmitter {
       case 'import_media': return await this.importMedia(p.path);
       case 'generate_sample': return this.generateSample(p);
       case 'generate_tone': return this.generateTone(p);
+      case 'save_project': return this.saveProjectFile(p.path);
+      case 'load_project': return this.loadProjectFile(p.path);
       case 'set_filter': { const c = this.project.setClipFilter(p); this._changed(); return c; }
 
       case 'add_track': { const id = this.project.addTrack(p.kind, p.name); this._changed(); return id; }

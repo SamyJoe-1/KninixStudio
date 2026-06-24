@@ -153,7 +153,9 @@ let dispatcher = controlRpc;
 function setDispatcher(fn) { dispatcher = fn; }
 
 // ---- JSON-RPC handling ----
-async function handleMessage(msg) {
+// dispatch defaults to the module-level `dispatcher` (stdio mode); pass an override for HTTP mode.
+async function handleMessage(msg, dispatch) {
+  const d = dispatch || dispatcher;
   const { id, method, params } = msg;
   const isNotification = id === undefined || id === null;
 
@@ -169,7 +171,7 @@ async function handleMessage(msg) {
         break;
       case 'notifications/initialized':
       case 'initialized':
-        return null; // notification, no reply
+        return null;
       case 'ping':
         result = {};
         break;
@@ -180,7 +182,7 @@ async function handleMessage(msg) {
         const tool = TOOLS.find(t => t.name === (params && params.name));
         if (!tool) throw new Error('Unknown tool: ' + (params && params.name));
         try {
-          const out = await dispatcher(tool.method, (params && params.arguments) || {});
+          const out = await d(tool.method, (params && params.arguments) || {});
           result = { content: [{ type: 'text', text: JSON.stringify(out, null, 2) }], isError: false };
         } catch (err) {
           result = { content: [{ type: 'text', text: 'Error: ' + String((err && err.message) || err) }], isError: true };
@@ -193,7 +195,7 @@ async function handleMessage(msg) {
       case 'resources/read': {
         const r = RESOURCES.find(x => x.uri === (params && params.uri));
         if (!r) throw new Error('Unknown resource: ' + (params && params.uri));
-        const out = await dispatcher(r.method, {});
+        const out = await d(r.method, {});
         result = { contents: [{ uri: r.uri, mimeType: r.mimeType, text: JSON.stringify(out, null, 2) }] };
         break;
       }
@@ -208,6 +210,76 @@ async function handleMessage(msg) {
     const e = err && err.code ? err : rpcError(-32603, String((err && err.message) || err));
     return { jsonrpc: '2.0', id, error: { code: e.code, message: e.message } };
   }
+}
+
+// ---- HTTP + SSE transport (fixed port, auto-started by the Electron main process) ----
+// Claude Desktop config:  { "url": "http://127.0.0.1:3333/sse" }
+// Kninix must be running; just keep the app open.
+const MCP_HTTP_PORT = 3333;
+
+function startMcpHttpServer(engine, port) {
+  port = port || MCP_HTTP_PORT;
+  const directDispatch = (method, params) => engine.dispatch(method, params);
+  const clients = new Map();  // sessionId -> SSE response
+  let nextSid = 1;
+
+  const server = http.createServer(async (req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
+
+    const url = new URL(req.url, `http://127.0.0.1:${port}`);
+
+    // SSE endpoint: client connects here to receive server→client messages
+    if (req.method === 'GET' && url.pathname === '/sse') {
+      const sid = nextSid++;
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      });
+      res.flushHeaders();
+      clients.set(sid, res);
+      // Tell the client which URL to POST messages to
+      res.write(`event: endpoint\ndata: /message?session=${sid}\n\n`);
+      const ping = setInterval(() => { try { res.write(': ping\n\n'); } catch { clearInterval(ping); } }, 15000);
+      req.on('close', () => { clients.delete(sid); clearInterval(ping); });
+      return;
+    }
+
+    // Message endpoint: client POSTs JSON-RPC here, reply comes back over SSE
+    if (req.method === 'POST' && url.pathname === '/message') {
+      const sid = +url.searchParams.get('session');
+      const client = clients.get(sid);
+      let body = '';
+      req.on('data', c => (body += c));
+      req.on('end', async () => {
+        res.writeHead(202); res.end('accepted');
+        let msg;
+        try { msg = JSON.parse(body); } catch { return; }
+        const reply = await handleMessage(msg, directDispatch);
+        if (reply && client) {
+          try { client.write(`data: ${JSON.stringify(reply)}\n\n`); } catch {}
+        }
+      });
+      return;
+    }
+
+    if (url.pathname === '/') {
+      res.writeHead(200, { 'content-type': 'text/plain' });
+      return res.end(`Kninix Studio MCP\nSSE endpoint: http://127.0.0.1:${port}/sse\nAdd to Claude Desktop: { "url": "http://127.0.0.1:${port}/sse" }`);
+    }
+
+    res.writeHead(404); res.end('not found');
+  });
+
+  server.listen(port, '127.0.0.1', () => {
+    process.stderr.write(`[Kninix-mcp] HTTP+SSE ready → http://127.0.0.1:${port}/sse\n`);
+  });
+
+  return server;
 }
 
 function rpcError(code, message) { const e = new Error(message); e.code = code; return e; }
@@ -283,4 +355,4 @@ if (require.main === module) {
   else startStdioLoop();
 }
 
-module.exports = { handleMessage, setDispatcher, TOOLS, RESOURCES };
+module.exports = { handleMessage, setDispatcher, TOOLS, RESOURCES, startMcpHttpServer, MCP_HTTP_PORT };

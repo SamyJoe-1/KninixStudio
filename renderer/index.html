@@ -18,6 +18,8 @@
       <button id="btnRedo" class="btn ghost" disabled title="Redo (Ctrl+Y)">↷</button>
       <span class="grow"></span>
       <span class="fps">UI <b id="fps">60</b> fps</span>
+      <button id="btnOpenProject" class="btn ghost" title="Open a .knx project">Open Project</button>
+      <button id="btnSaveProject" class="btn ghost" title="Save a tiny .knx project file">Save Project</button>
       <button id="btnExport" class="btn accent">⬇ Export</button>
     </div>
   </header>
@@ -37,6 +39,11 @@
         <select id="resProfile" title="Export window size / aspect ratio"></select>
         <span class="resdim"><input id="resW" type="number" min="16" title="Width"> × <input id="resH" type="number" min="16" title="Height"></span>
         <span class="ratio-tag" id="ratioTag">16:9</span>
+        <span class="pv-sep"></span>
+        <span class="muted small">View</span>
+        <button id="pvModeSelect" class="btn pv-tool on" title="Select tool (V)">↖</button>
+        <button id="pvModePan"    class="btn pv-tool"    title="Pan tool (H) · left-drag to pan canvas">✋</button>
+        <span id="pvZoomLabel" class="pv-zoom-lbl" title="Click to cycle · Ctrl+Scroll · double-click resets">Fit</span>
         <span class="grow"></span>
         <span class="muted small">Bright area = what exports · dimmed = cropped out</span>
       </div>
@@ -86,6 +93,16 @@
     <span class="grow"></span>
     <span class="muted">Claude/MCP: <code>npm run mcp</code> · same project</span>
   </footer>
+
+  <div class="export-blocker hidden" id="exportBlocker">
+    <div class="export-card">
+      <div class="export-title">Exporting video</div>
+      <div class="export-pct" id="exportPct">0%</div>
+      <div class="export-progress"><div id="exportProgress"></div></div>
+      <div class="export-detail" id="exportDetail">Preparing…</div>
+      <button class="btn del" id="btnCancelExport">Cancel</button>
+    </div>
+  </div>
 
   <script src="app.js"></script>
 </body>

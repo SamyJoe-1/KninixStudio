@@ -166,6 +166,15 @@ function extractPeaks(file, n = 240, { signal } = {}) {
 
 function clampTempo(s) { return Math.max(0.5, Math.min(2, s)); }
 
+function escText(s) {
+  return String(s || '').replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\\'").replace(/\[/g, '\\[').replace(/\]/g, '\\]').replace(/\r?\n/g, ' ');
+}
+
+function colorHex(c, fallback = 'FFFFFF') {
+  const m = /^#?([0-9a-f]{6})/i.exec(String(c || ''));
+  return '0x' + (m ? m[1] : fallback);
+}
+
 // Camtasia-style timeline compositor. ONE ffmpeg pass:
 //   * a black canvas spanning 0 -> total timeline length (gaps render as black),
 //   * every clip on EVERY track placed at its ABSOLUTE timelineIn (not concatenated),
@@ -174,10 +183,11 @@ function clampTempo(s) { return Math.max(0.5, Math.min(2, s)); }
 //   * each clip's audio delayed to its start time and mixed over a silent bed.
 // Result: total duration = end of the last clip (NOT the sum), and "image at 4s for 10s
 // on track 2 with track 1 empty" exports a 14s video that is black 0->4 then the image.
-async function exportTimeline(project, outPath, { signal, onProgress } = {}) {
+async function exportTimeline(project, outPath, { signal, onProgress, overlay } = {}) {
   const W = (project.resolution && project.resolution.w) || 1280;
   const H = (project.resolution && project.resolution.h) || 720;
   const tracks = project.tracks || [];
+  const topId = tracks.length ? tracks[tracks.length - 1].id : null;
 
   // Gather clips from every track. Track array order = stack order: index 0 is the
   // bottom track, later tracks composite on top (matches the editor's drawOverlay).
@@ -186,13 +196,22 @@ async function exportTimeline(project, outPath, { signal, onProgress } = {}) {
     const media = project.media[c.mediaId];
     if (media) comp.push({ c, media, ti });
   }});
-  if (!comp.length) throw new Error('Timeline is empty — add a clip before exporting.');
+  const objects = [];
+  tracks.forEach((t, ti) => {
+    for (const o of (project.objects || [])) {
+      if (o.hidden) continue;
+      if (o.trackId === t.id || (t.id === topId && !o.trackId)) objects.push({ o, ti });
+    }
+  });
+  if (!comp.length && !objects.length) throw new Error('Timeline is empty — add at least one 1-second item before exporting.');
   comp.sort((a, b) => (a.ti - b.ti) || (a.c.timelineIn - b.c.timelineIn));
+  objects.sort((a, b) => (a.ti - b.ti));
 
   // Total = end of the LAST clip on the timeline (gaps included), never the sum of clips.
   const total = +Math.max(
     project.duration ? project.duration() : 0,
-    ...comp.map(x => x.c.timelineOut)
+    ...comp.map(x => x.c.timelineOut),
+    ...objects.map(x => x.o.end || 0)
   ).toFixed(3);
   if (total <= 0) throw new Error('Timeline has zero length.');
 
@@ -224,19 +243,18 @@ async function exportTimeline(project, outPath, { signal, onProgress } = {}) {
     const rx = Math.round(rect.x), ry = Math.round(rect.y);
     const speed = c.speed || 1;
     const tin = +c.timelineIn.toFixed(3), tout = +c.timelineOut.toFixed(3);
-    // Fit-into-rect (letterbox with transparent pad) so lower layers show through the bars,
-    // then shift the clip's timestamps so it begins at its absolute timelineIn.
-    const shift = speed !== 1 ? `(PTS-STARTPTS)/${speed}+${tin}/TB` : `PTS-STARTPTS+${tin}/TB`;
-    fc.push(
-      `[${idx}:v]scale=${rw}:${rh}:force_original_aspect_ratio=decrease,` +
-      `pad=${rw}:${rh}:(ow-iw)/2:(oh-ih)/2:color=black@0,setsar=1,fps=30,` +
-      `format=yuva420p,setpts=${shift}[cv${k}]`
-    );
-    fc.push(
-      `[${last}][cv${k}]overlay=x=${rx}:y=${ry}:eof_action=pass:` +
-      `enable='between(t,${tin},${tout})'[ov${k}]`
-    );
-    last = `ov${k}`;
+    if (media.hasVideo) {
+      const shift = speed !== 1 ? `(PTS-STARTPTS)/${speed}+${tin}/TB` : `PTS-STARTPTS+${tin}/TB`;
+      fc.push(
+        `[${idx}:v]scale=${rw}:${rh}:force_original_aspect_ratio=increase,` +
+        `crop=${rw}:${rh},setsar=1,fps=30,format=yuva420p,setpts=${shift}[cv${k}]`
+      );
+      fc.push(
+        `[${last}][cv${k}]overlay=x=${rx}:y=${ry}:eof_action=pass:` +
+        `enable='between(t,${tin},${tout})'[ov${k}]`
+      );
+      last = `ov${k}`;
+    }
     if (media.hasAudio) {
       const ms = Math.max(0, Math.round(tin * 1000));
       let a = `[${idx}:a]aresample=44100`;
@@ -248,7 +266,56 @@ async function exportTimeline(project, outPath, { signal, onProgress } = {}) {
     }
   });
 
-  fc.push(`[${last}]format=yuv420p[vout]`);
+  let ovTmpDir = null;
+  if (overlay && overlay.frames && overlay.frames.length) {
+    // ── PNG overlay path: pixel-perfect, identical to the editor preview ────
+    // Write the renderer's frames as a numbered sequence and read them back as a
+    // constant-fps RGBA video, then composite over the video at 0,0.
+    const ovFps = overlay.fps || 12;
+    ovTmpDir = path.join(os.tmpdir(), `kx_ov_${Date.now()}`);
+    fs.mkdirSync(ovTmpDir, { recursive: true });
+    overlay.frames.forEach((f, i) => {
+      fs.writeFileSync(path.join(ovTmpDir, `f${i}.png`), Buffer.from(f));
+    });
+    const ovIdx = silenceIdx + 1;
+    args.push('-framerate', String(ovFps), '-start_number', '0',
+              '-i', path.join(ovTmpDir, 'f%d.png'));
+    // Stretch the overlay timeline to 30fps and hold the last frame to the end.
+    fc.push(`[${ovIdx}:v]format=rgba,fps=30,setpts=PTS-STARTPTS[ovfmt]`);
+    fc.push(`[${last}][ovfmt]overlay=0:0:format=auto:eof_action=repeat,format=yuv420p[vout]`);
+  } else {
+    // ── FFmpeg-filter fallback (no renderer, or no objects) ─────────────────
+    objects.forEach(({ o }, k) => {
+      const out = `obj${k}`;
+      const x = Math.round(o.x || 0), y = Math.round(o.y || 0);
+      const w = Math.max(2, Math.round(o.w || 2)), h = Math.max(2, Math.round(o.h || 2));
+      const start = +Number(o.start || 0).toFixed(3);
+      const end   = +Number(o.end || (start + 3)).toFixed(3);
+      const enable = `enable='between(t,${start},${end})'`;
+      if (o.type === 'text') {
+        const fs = Math.max(8, Math.round(o.fontSize || 72));
+        const alignX = o.align === 'left' ? x : (o.align === 'right' ? `${x+w}-text_w` : `${x}+((${w}-text_w)/2)`);
+        fc.push(`[${last}]drawtext=text='${escText(o.text)}':x=${alignX}:y=${y}:fontsize=${fs}:fontcolor=${colorHex(o.color)}:${enable}[${out}]`);
+      } else if (o.type === 'caption') {
+        // Simplified fallback: full caption text with stroke+shadow, no word animation
+        const fs = Math.max(8, Math.round(o.fontSize || 88));
+        const cx  = `${x}+((${w}-text_w)/2)`;
+        const bw  = Math.round(o.strokeWidth || 7);
+        const bc  = colorHex(o.strokeColor || '#000000', '000000');
+        const sx  = Math.round(o.shadowOffsetX || 2), sy = Math.round(o.shadowOffsetY || 3);
+        const sc  = colorHex(o.shadowColor || '#000000', '000000');
+        fc.push(`[${last}]drawtext=text='${escText(o.text)}':x=${cx}:y=${y}:fontsize=${fs}:fontcolor=${colorHex(o.color)}:borderw=${bw}:bordercolor=${bc}:shadowx=${sx}:shadowy=${sy}:shadowcolor=${sc}:${enable}[${out}]`);
+      } else if (o.type === 'widget') {
+        const text = escText(o.title || o.widget || '');
+        const fs = Math.max(8, Math.round(o.fontSize || 48));
+        fc.push(`[${last}]drawtext=text='${text}':x=${x}+((${w}-text_w)/2):y=${y}+((${h}-text_h)/2):fontsize=${fs}:fontcolor=${colorHex(o.color)}:${enable}[${out}]`);
+      } else {
+        fc.push(`[${last}]drawbox=x=${x}:y=${y}:w=${w}:h=${h}:color=${colorHex(o.color,'6C5CE7')}@${o.opacity!=null?o.opacity:1}:t=fill:${enable}[${out}]`);
+      }
+      last = out;
+    });
+    fc.push(`[${last}]format=yuv420p[vout]`);
+  }
   let aout;
   if (audioLabels.length) {
     fc.push(`[${silenceIdx}:a]${audioLabels.join('')}amix=inputs=${audioLabels.length + 1}:normalize=0:dropout_transition=0[aout]`);
@@ -263,7 +330,12 @@ async function exportTimeline(project, outPath, { signal, onProgress } = {}) {
             '-c:a', 'aac', '-ar', '44100', '-ac', '2',
             '-movflags', '+faststart', '-progress', 'pipe:1', '-nostats', outPath);
 
-  await run(FFMPEG, args, { signal, onLine: onProgress ? progressParser(total, onProgress) : null });
+  try {
+    await run(FFMPEG, args, { signal, onLine: onProgress ? progressParser(total, onProgress) : null });
+  } finally {
+    // Clean up temp overlay PNGs regardless of success/failure.
+    if (ovTmpDir) try { fs.rmSync(ovTmpDir, { recursive: true, force: true }); } catch (_) {}
+  }
   if (onProgress) onProgress(1, 'done');
   return outPath;
 }

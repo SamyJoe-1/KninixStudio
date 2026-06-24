@@ -9,6 +9,10 @@ function uid(prefix) {
   return prefix + '_' + crypto.randomBytes(5).toString('hex');
 }
 
+function rangesOverlap(a0, a1, b0, b1) {
+  return a0 < b1 && a1 > b0;
+}
+
 class Project {
   constructor() {
     this.name = 'Untitled';
@@ -63,8 +67,32 @@ class Project {
   _restore(s) {
     const o = JSON.parse(s);
     this.name = o.name; this.resolution = o.resolution; this.fps = o.fps;
-    this.media = o.media; this.tracks = o.tracks; this.objects = o.objects || [];
-    this.markers = o.markers; this.playhead = o.playhead;
+    this.media = o.media || {}; this.tracks = o.tracks || [{ id: 'trk_1', kind: 'video', name: 'Track 1', clips: [] }]; this.objects = o.objects || [];
+    this.markers = o.markers || []; this.playhead = o.playhead || 0;
+  }
+  loadSerialized(o) {
+    this._checkpoint();
+    this.name = o.name || 'Untitled';
+    this.resolution = o.resolution || { w: 1280, h: 720 };
+    this.fps = o.fps || 30;
+    this.media = o.media || {};
+    this.tracks = (o.tracks && o.tracks.length) ? o.tracks : [{ id: 'trk_1', kind: 'video', name: 'Track 1', clips: [] }];
+    this.objects = o.objects || [];
+    this.markers = o.markers || [];
+    this.playhead = o.playhead || 0;
+  }
+  exportData() {
+    const data = this.serialize();
+    delete data.canUndo;
+    delete data.canRedo;
+    delete data.duration;
+    return {
+      app: 'Kninix Studio',
+      format: 'kninix-project',
+      version: 1,
+      savedAt: new Date().toISOString(),
+      project: data,
+    };
   }
   _checkpoint() {
     this._undo.push(this._snapshot());
@@ -105,7 +133,39 @@ class Project {
   _appendPoint(track) {
     let end = 0;
     for (const c of track.clips) end = Math.max(end, c.timelineOut);
+    for (const o of this.objects) if (o.trackId === track.id) end = Math.max(end, o.end || 0);
     return end;
+  }
+
+  _trackItems(trackId, except = {}) {
+    const items = [];
+    const track = this.track(trackId);
+    if (track) for (const c of track.clips || []) {
+      if (except.clipId !== c.id) items.push({ id: c.id, start: c.timelineIn, end: c.timelineOut, type: 'clip' });
+    }
+    for (const o of this.objects || []) {
+      if (o.trackId === trackId && except.objectId !== o.id) items.push({ id: o.id, start: o.start || 0, end: o.end || 0, type: 'object' });
+    }
+    return items;
+  }
+
+  _assertTrackSpace(trackId, start, end, except) {
+    if (!trackId) return;
+    if (end <= start) throw new Error('Timeline item must be at least 1 second long.');
+    for (const item of this._trackItems(trackId, except)) {
+      if (rangesOverlap(start, end, item.start, item.end)) {
+        throw new Error('Track time is already occupied. Put it on another track, or before/after that item.');
+      }
+    }
+  }
+
+  _coverRect(media, W = this.resolution.w, H = this.resolution.h) {
+    const mw = media && media.width ? media.width : W;
+    const mh = media && media.height ? media.height : H;
+    const scale = Math.max(W / Math.max(1, mw), H / Math.max(1, mh));
+    const w = Math.round(mw * scale);
+    const h = Math.round(mh * scale);
+    return { x: Math.round((W - w) / 2), y: Math.round((H - h) / 2), w, h };
   }
 
   addClip({ mediaId, trackId, at } = {}) {
@@ -113,9 +173,10 @@ class Project {
     if (!media) throw new Error('No such media: ' + mediaId);
     let track = trackId ? this.track(trackId) : this.tracks.find(t => t.kind === (media.kind || 'video'));
     if (!track) track = this.tracks[0];
-    this._checkpoint();
     const dur = media.duration || 5;
     const start = (at != null) ? Math.max(0, at) : this._appendPoint(track);
+    this._assertTrackSpace(track.id, start, start + dur);
+    this._checkpoint();
     const clip = {
       id: uid('clp'),
       mediaId,
@@ -124,8 +185,9 @@ class Project {
       timelineOut: +(start + dur).toFixed(3),
       sourceIn: 0,
       sourceOut: +dur.toFixed(3),
-      // canvas placement (export-pixel space). Default = fill the whole export frame.
-      rect: { x: 0, y: 0, w: this.resolution.w, h: this.resolution.h },
+      // Canvas placement in export pixels. Default covers the frame, so changing
+      // 16:9 footage to Shorts crops the sides instead of letterboxing.
+      rect: this._coverRect(media),
       opacity: 1,
     };
     track.clips.push(clip);
@@ -144,10 +206,13 @@ class Project {
   moveClip({ clipId, at } = {}) {
     const f = this.findClip(clipId);
     if (!f) throw new Error('No such clip: ' + clipId);
-    this._checkpoint();
     const len = f.clip.timelineOut - f.clip.timelineIn;
-    f.clip.timelineIn = +Math.max(0, at).toFixed(3);
-    f.clip.timelineOut = +(f.clip.timelineIn + len).toFixed(3);
+    const start = +Math.max(0, at).toFixed(3);
+    const end = +(start + len).toFixed(3);
+    this._assertTrackSpace(f.track.id, start, end, { clipId });
+    this._checkpoint();
+    f.clip.timelineIn = start;
+    f.clip.timelineOut = end;
     f.track.clips.sort((a, b) => a.timelineIn - b.timelineIn);
     return f.clip;
   }
@@ -155,16 +220,18 @@ class Project {
   trimClip({ clipId, sourceIn, sourceOut } = {}) {
     const f = this.findClip(clipId);
     if (!f) throw new Error('No such clip: ' + clipId);
-    this._checkpoint();
     const media = this.media[f.clip.mediaId];
     // Stills have no real length — they can be stretched to any duration on the timeline.
     const maxDur = (media && !media.isImage) ? media.duration : Infinity;
     const si = Math.max(0, sourceIn != null ? sourceIn : f.clip.sourceIn);
     const so = Math.min(maxDur, sourceOut != null ? sourceOut : f.clip.sourceOut);
     if (so <= si) throw new Error('Invalid trim (out <= in)');
+    const end = +(f.clip.timelineIn + (so - si)).toFixed(3);
+    this._assertTrackSpace(f.track.id, f.clip.timelineIn, end, { clipId });
+    this._checkpoint();
     f.clip.sourceIn = +si.toFixed(3);
     f.clip.sourceOut = +so.toFixed(3);
-    f.clip.timelineOut = +(f.clip.timelineIn + (so - si)).toFixed(3);
+    f.clip.timelineOut = end;
     return f.clip;
   }
 
@@ -201,8 +268,9 @@ class Project {
   // type 'text'  -> { text, fontSize, color, align }
   // anything else -> a shape; the shape kind lives in `shape`
   //   (rect, roundrect, ellipse, triangle, diamond, star, pentagon, hexagon, heart, arrow, line, ring)
-  addObject({ type = 'text', shape, widget, x, y, w, h, text, subtitle, color, fontSize, start, end, align, radius, trackId } = {}) {
-    this._checkpoint();
+  addObject({ type = 'text', shape, widget, x, y, w, h, text, subtitle, color, fontSize, start, end, align, radius, trackId,
+    strokeColor, strokeWidth, shadowColor, shadowAlpha, shadowBlur, shadowOffsetX, shadowOffsetY,
+    bgShape, bgColor, bgAlpha, bgPadding, wordGlow, words, highlightMode, boxPadding } = {}) {
     const W = this.resolution.w, H = this.resolution.h;
     const common = {
       id: uid('obj'), opacity: 1, rotation: 0, hidden: false, locked: false,
@@ -213,12 +281,27 @@ class Project {
       start: start != null ? start : 0,
       end: end != null ? end : (start != null ? start : 0) + 3,
     };
+    if ((common.end - common.start) < 1) common.end = common.start + 1;
+    this._assertTrackSpace(common.trackId, common.start, common.end);
+    this._checkpoint();
     let obj;
     if (type === 'text') {
       obj = Object.assign(common, {
         type: 'text', x: W * 0.18, y: H * 0.40, w: W * 0.64, h: 150,
         text: text || 'Double-click to edit', color: color || '#FFFFFF',
         fontSize: fontSize || 72, align: align || 'center',
+      });
+    } else if (type === 'caption') {
+      obj = Object.assign(common, {
+        type: 'caption', x: W * 0.05, y: H * 0.78, w: W * 0.9, h: 200,
+        text: text || 'Hello world',
+        fontSize: fontSize || 88, color: color || '#FFFFFF', align: align || 'center',
+        strokeColor: strokeColor || '#000000', strokeWidth: strokeWidth ?? 8,
+        shadowColor: shadowColor || '#000000', shadowAlpha: shadowAlpha ?? 0.9,
+        shadowBlur: shadowBlur ?? 10, shadowOffsetX: shadowOffsetX ?? 2, shadowOffsetY: shadowOffsetY ?? 3,
+        bgShape: bgShape || 'none', bgColor: bgColor || '#000000', bgAlpha: bgAlpha ?? 0.6,
+        bgPadding: bgPadding ?? 20, wordGlow: wordGlow || false, words: words || [],
+        highlightMode: highlightMode || 'color', boxPadding: boxPadding ?? 12,
       });
     } else if (type === 'widget') {
       const wk = widget || 'lowerthird';
@@ -242,7 +325,7 @@ class Project {
     if (x != null) obj.x = x; if (y != null) obj.y = y;
     if (w != null) obj.w = w; if (h != null) obj.h = h;
     if (color != null) obj.color = color;
-    if (text != null && obj.type === 'text') obj.text = text;
+    if (text != null && (obj.type === 'text' || obj.type === 'caption')) obj.text = text;
     this.objects.push(obj);
     return obj;
   }
@@ -293,6 +376,9 @@ class Project {
   updateObject({ id, patch } = {}) {
     const o = this.findObject(id);
     if (!o) throw new Error('No such object: ' + id);
+    const next = Object.assign({}, o, patch || {});
+    if ((next.end || 0) - (next.start || 0) < 1) throw new Error('Timeline item must be at least 1 second long.');
+    this._assertTrackSpace(next.trackId, next.start || 0, next.end || 0, { objectId: id });
     this._checkpoint();
     Object.assign(o, patch || {});
     return o;
@@ -322,6 +408,9 @@ class Project {
     const H = Math.max(16, Math.round(h || this.resolution.h));
     this._checkpoint();
     this.resolution = { w: W, h: H };
+    for (const track of this.tracks) {
+      for (const clip of track.clips || []) clip.rect = this._coverRect(this.media[clip.mediaId], W, H);
+    }
     return this.resolution;
   }
 }
