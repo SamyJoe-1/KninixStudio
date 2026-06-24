@@ -183,9 +183,13 @@ function colorHex(c, fallback = 'FFFFFF') {
 //   * each clip's audio delayed to its start time and mixed over a silent bed.
 // Result: total duration = end of the last clip (NOT the sum), and "image at 4s for 10s
 // on track 2 with track 1 empty" exports a 14s video that is black 0->4 then the image.
-async function exportTimeline(project, outPath, { signal, onProgress, overlay } = {}) {
+async function exportTimeline(project, outPath, { signal, onProgress, overlay, fps, outW, outH } = {}) {
   const W = (project.resolution && project.resolution.w) || 1280;
   const H = (project.resolution && project.resolution.h) || 720;
+  const FPS = Math.min(120, Math.max(12, parseInt(fps) || 30));
+  const scaledW = (outW && outW > 0) ? outW : W;
+  const scaledH = (outH && outH > 0) ? outH : H;
+  const needsScale = scaledW !== W || scaledH !== H;
   const tracks = project.tracks || [];
   const topId = tracks.length ? tracks[tracks.length - 1].id : null;
 
@@ -217,7 +221,7 @@ async function exportTimeline(project, outPath, { signal, onProgress, overlay } 
 
   const args = ['-y'];
   // input 0: black canvas for the whole duration.
-  args.push('-f', 'lavfi', '-t', String(total), '-i', `color=c=black:s=${W}x${H}:r=30`);
+  args.push('-f', 'lavfi', '-t', String(total), '-i', `color=c=black:s=${W}x${H}:r=${FPS}`);
   // inputs 1..N: one per clip (stills looped, videos trimmed by source in/out).
   comp.forEach(({ c, media }) => {
     if (media.isImage) {
@@ -232,7 +236,7 @@ async function exportTimeline(project, outPath, { signal, onProgress, overlay } 
   args.push('-f', 'lavfi', '-t', String(total), '-i', 'anullsrc=r=44100:cl=stereo');
 
   const fc = [];
-  fc.push(`[0:v]fps=30,format=yuv420p[base]`);
+  fc.push(`[0:v]fps=${FPS},format=yuv420p[base]`);
   let last = 'base';
   const audioLabels = [];
 
@@ -247,7 +251,7 @@ async function exportTimeline(project, outPath, { signal, onProgress, overlay } 
       const shift = speed !== 1 ? `(PTS-STARTPTS)/${speed}+${tin}/TB` : `PTS-STARTPTS+${tin}/TB`;
       fc.push(
         `[${idx}:v]scale=${rw}:${rh}:force_original_aspect_ratio=increase,` +
-        `crop=${rw}:${rh},setsar=1,fps=30,format=yuva420p,setpts=${shift}[cv${k}]`
+        `crop=${rw}:${rh},setsar=1,fps=${FPS},format=yuva420p,setpts=${shift}[cv${k}]`
       );
       fc.push(
         `[${last}][cv${k}]overlay=x=${rx}:y=${ry}:eof_action=pass:` +
@@ -274,15 +278,18 @@ async function exportTimeline(project, outPath, { signal, onProgress, overlay } 
     const ovFps = overlay.fps || 12;
     ovTmpDir = path.join(os.tmpdir(), `kx_ov_${Date.now()}`);
     fs.mkdirSync(ovTmpDir, { recursive: true });
-    overlay.frames.forEach((f, i) => {
-      fs.writeFileSync(path.join(ovTmpDir, `f${i}.png`), Buffer.from(f));
-    });
+    // Write all frames concurrently instead of one-by-one — for 150+ frames this
+    // can cut disk-write time from several seconds to under one second.
+    await Promise.all(overlay.frames.map((f, i) =>
+      fs.promises.writeFile(path.join(ovTmpDir, `f${i}.png`), Buffer.from(f))
+    ));
     const ovIdx = silenceIdx + 1;
     args.push('-framerate', String(ovFps), '-start_number', '0',
               '-i', path.join(ovTmpDir, 'f%d.png'));
-    // Stretch the overlay timeline to 30fps and hold the last frame to the end.
-    fc.push(`[${ovIdx}:v]format=rgba,fps=30,setpts=PTS-STARTPTS[ovfmt]`);
-    fc.push(`[${last}][ovfmt]overlay=0:0:format=auto:eof_action=repeat,format=yuv420p[vout]`);
+    // Stretch the overlay timeline to target fps and hold the last frame to the end.
+    fc.push(`[${ovIdx}:v]format=rgba,fps=${FPS},setpts=PTS-STARTPTS[ovfmt]`);
+    const scaleOv = needsScale ? `scale=${scaledW}:${scaledH}:flags=lanczos,` : '';
+    fc.push(`[${last}][ovfmt]overlay=0:0:format=auto:eof_action=repeat,${scaleOv}format=yuv420p[vout]`);
   } else {
     // ── FFmpeg-filter fallback (no renderer, or no objects) ─────────────────
     objects.forEach(({ o }, k) => {
@@ -314,7 +321,8 @@ async function exportTimeline(project, outPath, { signal, onProgress, overlay } 
       }
       last = out;
     });
-    fc.push(`[${last}]format=yuv420p[vout]`);
+    const scaleFb = needsScale ? `scale=${scaledW}:${scaledH}:flags=lanczos,` : '';
+    fc.push(`[${last}]${scaleFb}format=yuv420p[vout]`);
   }
   let aout;
   if (audioLabels.length) {
@@ -326,7 +334,8 @@ async function exportTimeline(project, outPath, { signal, onProgress, overlay } 
 
   args.push('-filter_complex', fc.join(';'));
   args.push('-map', '[vout]', '-map', aout, '-t', String(total));
-  args.push('-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
+  args.push('-threads', '0',
+            '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
             '-c:a', 'aac', '-ar', '44100', '-ac', '2',
             '-movflags', '+faststart', '-progress', 'pipe:1', '-nostats', outPath);
 

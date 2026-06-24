@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('kx', {
   pickFile: () => ipcRenderer.invoke('pick-file'),
   pickProject: () => ipcRenderer.invoke('pick-project'),
   saveProjectAs: () => ipcRenderer.invoke('save-project-as'),
+  pickExportPath: (opts) => ipcRenderer.invoke('pick-export-path', opts || {}),
   reveal: (p) => ipcRenderer.invoke('reveal', p),
   openPath: (p) => ipcRenderer.invoke('open-path', p),
 

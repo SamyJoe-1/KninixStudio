@@ -115,41 +115,59 @@ class Engine extends EventEmitter {
     return this.state();
   }
 
-  exportProject({ name } = {}) {
-    const out = path.join(this.outDir, `${(name || 'export_' + Date.now()).replace(/[^\w.-]/g, '_')}.mp4`);
+  exportProject({ outPath, fps, quality, name } = {}) {
+    // Compute actual output dimensions from quality preset (preserves project aspect ratio).
+    const res = this.project.resolution || {};
+    const projW = res.w || 1280, projH = res.h || 720;
+    const QUALITY_HEIGHTS = { 480: 480, 720: 720, 1080: 1080, 1440: 1440, 2160: 2160 };
+    let outW = projW, outH = projH;
+    if (quality && QUALITY_HEIGHTS[quality]) {
+      const tH = QUALITY_HEIGHTS[quality];
+      const scale = tH / projH;
+      outW = Math.round(projW * scale);
+      outH = tH;
+      if (outW % 2) outW++;
+      if (outH % 2) outH++;
+    }
+
+    const exportFps = Math.min(120, Math.max(12, parseInt(fps) || 30));
+
+    // Resolve the output path. Custom path directories are created on demand.
+    let out;
+    if (outPath && outPath.trim()) {
+      out = outPath.trim();
+      fs.mkdirSync(path.dirname(out), { recursive: true });
+    } else {
+      out = path.join(this.outDir, `${(name || 'export_' + Date.now()).replace(/[^\w.-]/g, '_')}.mp4`);
+    }
+
     const project = this.project;
     const overlayRenderer = this._overlayRenderer;
     const jobId = this.jobs.submit({
       type: 'export',
       label: `Export · ${path.basename(out)}`,
       run: async ({ signal, onProgress }) => {
-        // Rasterise the live preview overlay (captions/text/shapes/widgets) on an fps
-        // grid, so the export is pixel-identical to the editor. Falls back to FFmpeg
-        // filters only if there's no renderer attached.
         let overlay = null;
         const objects = (project.objects || []).filter(o => !o.hidden);
-        // total timeline length = end of the last clip or object.
         let total = 0;
         for (const t of (project.tracks || [])) for (const c of (t.clips || [])) total = Math.max(total, c.timelineOut || 0);
         for (const o of objects) total = Math.max(total, o.end || 0);
         total = +total.toFixed(3);
 
-        // Whole-export progress is split into two real phases so the bar reflects the
-        // full flow instead of sitting at 0% during caption rendering then jumping.
-        //   phase 1 (0 → OVERLAY_W): rasterising caption/overlay frames in the renderer
-        //   phase 2 (OVERLAY_W → 1): FFmpeg encoding the final video
+        // Each phase reports its own 0→1 progress independently — the bar resets
+        // between phases so users see two clean sweeps instead of a split bar.
         const useOverlay = !!(overlayRenderer && objects.length && total > 0);
-        const OVERLAY_W = useOverlay ? 0.55 : 0;
 
         if (useOverlay) {
+          // Cap overlay rasterisation at 30fps. Captions and text are smooth at 30fps;
+          // FFmpeg's fps filter holds/duplicates frames for higher output frame rates.
+          // This prevents 100fps exports from rasterising 500 frames instead of 150.
+          const overlayFps = Math.min(exportFps, 30);
           onProgress(0, 'Rendering captions… 0%');
           try {
             const r = await overlayRenderer({
-              fps: 30, total,
-              onProgress: (frac) => onProgress(
-                Math.min(OVERLAY_W - 0.001, frac * OVERLAY_W),
-                'Rendering captions… ' + Math.round(frac * 100) + '%'
-              ),
+              fps: overlayFps, total,
+              onProgress: (frac) => onProgress(frac, 'Rendering captions… ' + Math.round(frac * 100) + '%'),
             });
             if (r && r.frames && r.frames.length) overlay = r;
           } catch (e) {
@@ -157,12 +175,12 @@ class Engine extends EventEmitter {
           }
         }
 
+        // Reset to 0 so phase 2 starts a fresh sweep.
+        onProgress(0, 'Encoding video… 0%');
+
         await ff.exportTimeline(project, out, {
-          signal, overlay,
-          onProgress: (frac, detail) => onProgress(
-            OVERLAY_W + (frac || 0) * (1 - OVERLAY_W),
-            'Encoding video… ' + Math.round((frac || 0) * 100) + '%'
-          ),
+          signal, overlay, fps: exportFps, outW, outH,
+          onProgress: (frac) => onProgress(frac || 0, 'Encoding video… ' + Math.round((frac || 0) * 100) + '%'),
         });
         return { out };
       },

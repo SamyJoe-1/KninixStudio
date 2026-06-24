@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self';" />
+  <title>Exporting…</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; }
+    body {
+      font-family: "Segoe UI", Inter, system-ui, sans-serif;
+      background: #16181D;
+      color: #F2F4F8;
+      padding: 14px 16px;
+      user-select: none;
+      font-size: 12px;
+      border: 1px solid #2A2E37;
+      border-radius: 10px;
+    }
+    .drag-area {
+      display: flex; align-items: center; gap: 8px;
+      margin-bottom: 10px;
+      -webkit-app-region: drag;
+      cursor: move;
+    }
+    .logo { color: #6C5CE7; font-size: 14px; }
+    .phase-label { flex: 1; font-weight: 600; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .pct { font-size: 13px; color: #6C5CE7; font-variant-numeric: tabular-nums; font-weight: 700; }
+    .bar-wrap {
+      height: 6px; background: #0E0F12; border-radius: 999px;
+      overflow: hidden; margin-bottom: 10px; border: 1px solid #2A2E37;
+    }
+    .bar-fill {
+      height: 100%; width: 0%; background: #6C5CE7;
+      border-radius: 999px; transition: width 0.14s linear;
+    }
+    .detail-row { display: flex; align-items: center; gap: 8px; -webkit-app-region: no-drag; }
+    .detail { flex: 1; font-size: 11px; color: #A7AEBC; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    button {
+      background: transparent; color: #FF5C72; border: 1px solid #3a2020;
+      padding: 3px 12px; border-radius: 5px; font-size: 11px; cursor: pointer;
+      -webkit-app-region: no-drag; flex-shrink: 0;
+    }
+    button:hover { background: rgba(255,92,114,.12); }
+  </style>
+</head>
+<body>
+  <div class="drag-area">
+    <span class="logo">◢◣</span>
+    <span class="phase-label" id="phase">Exporting video…</span>
+    <span class="pct" id="pct">0%</span>
+  </div>
+  <div class="bar-wrap"><div class="bar-fill" id="bar"></div></div>
+  <div class="detail-row">
+    <span class="detail" id="detail">Preparing…</span>
+    <button id="btnCancel">✕ Cancel</button>
+  </div>
+  <script src="export-progress.js"></script>
+</body>
+</html>

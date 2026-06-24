@@ -175,14 +175,46 @@ b { font-variant-numeric:tabular-nums; }
 .caption-tbl input { background:var(--bg-app); border:1px solid var(--stroke); border-radius:4px; color:var(--text); font-size:11px; font-family:inherit; }
 .caption-tbl tbody tr:hover td { background:rgba(255,255,255,.03); }
 
-/* Export screen: fully opaque — the whole editor UI is hidden behind it until the
-   export finishes or is cancelled, so only export progress is visible. */
-.export-blocker { position:fixed; inset:0; z-index:99999; display:grid; place-items:center; background:var(--bg-app); }
-.export-blocker.hidden { display:none; }
-.export-card { width:min(520px, calc(100vw - 48px)); border:1px solid var(--stroke); border-radius:14px; background:var(--bg-panel); padding:34px 30px; box-shadow:0 24px 80px rgba(0,0,0,.55); display:flex; flex-direction:column; gap:16px; align-items:stretch; text-align:center; }
-.export-title { font-size:18px; color:var(--text); font-weight:700; letter-spacing:.2px; }
-.export-pct { font-size:64px; font-weight:800; color:var(--text); font-variant-numeric:tabular-nums; line-height:1; margin:4px 0; }
-.export-detail { min-height:18px; color:var(--text-2); font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.export-progress { height:12px; border-radius:999px; background:#0c0e12; overflow:hidden; border:1px solid var(--stroke); }
-.export-progress div { height:100%; width:0%; background:var(--cue); transition:width .14s linear; }
-.export-card .btn { align-self:center; margin-top:6px; padding:8px 22px; }
+/* Export Settings Dialog — Camtasia-style two-step panel */
+.export-dialog { position:fixed; inset:0; z-index:99999; display:grid; place-items:center; background:rgba(0,0,0,.72); backdrop-filter:blur(4px); }
+.export-dialog.hidden { display:none; }
+.export-dlg-card { width:min(560px,calc(100vw - 48px)); border:1px solid var(--stroke); border-radius:14px; background:var(--bg-panel); padding:28px 30px; box-shadow:0 24px 80px rgba(0,0,0,.6); }
+
+/* Step indicator */
+.export-dlg-steps { display:flex; align-items:center; gap:8px; margin-bottom:22px; }
+.export-step { font-size:11px; color:var(--text-3); font-weight:500; }
+.export-step.active { color:var(--accent); font-weight:700; }
+.export-step-sep { color:var(--text-3); font-size:11px; }
+
+.export-dlg-title { font-size:18px; font-weight:700; color:var(--text); margin:0 0 20px; letter-spacing:.1px; }
+.export-dlg-section { margin-bottom:20px; }
+.export-dlg-label { display:block; font-size:10px; text-transform:uppercase; letter-spacing:.07em; color:var(--text-2); margin-bottom:8px; font-weight:600; }
+
+/* Output path */
+.export-path-row { display:flex; gap:8px; align-items:center; }
+.export-path-input { flex:1; background:var(--bg-elev); border:1px solid var(--stroke); border-radius:6px; color:var(--text); padding:7px 10px; font-size:12px; font-family:inherit; min-width:0; }
+.export-path-input::placeholder { color:var(--text-3); }
+
+/* Quality grid */
+.export-quality-grid { display:flex; gap:8px; flex-wrap:nowrap; }
+.quality-opt { position:relative; cursor:pointer; flex:1; }
+.quality-opt input[type="radio"] { position:absolute; opacity:0; width:0; height:0; }
+.qcard { border:1.5px solid var(--stroke); border-radius:8px; padding:8px 6px; text-align:center; transition:border-color .14s,background .14s; }
+.qcard b { display:block; font-size:12px; color:var(--text); font-weight:700; }
+.qcard span { font-size:10px; color:var(--text-3); }
+.quality-opt input:checked + .qcard { border-color:var(--accent); background:rgba(108,92,231,.12); }
+.quality-opt input:checked + .qcard b { color:var(--accent); }
+.quality-opt:hover .qcard { border-color:var(--accent-2); }
+
+/* FPS row */
+.export-fps-row { display:flex; align-items:center; gap:10px; }
+.export-fps-input { width:74px; background:var(--bg-elev); border:1px solid var(--stroke); border-radius:6px; color:var(--text); padding:7px 10px; font-size:13px; text-align:center; font-family:inherit; }
+
+/* Review step */
+.export-review { border:1px solid var(--stroke); border-radius:8px; padding:16px 18px; margin-bottom:20px; display:flex; flex-direction:column; gap:11px; }
+.review-row { display:flex; align-items:baseline; gap:14px; }
+.rlabel { min-width:78px; font-size:10px; text-transform:uppercase; letter-spacing:.07em; color:var(--text-3); font-weight:600; padding-top:1px; flex-shrink:0; }
+.rval { flex:1; font-size:12px; color:var(--text); word-break:break-all; }
+
+/* Dialog actions */
+.export-dlg-actions { display:flex; gap:10px; justify-content:flex-end; margin-top:4px; }

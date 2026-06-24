@@ -27,7 +27,6 @@ let selection = { kind:null, id:null, ids:[] };
 let activeTrackId = null;   // which numbered track new media/overlays land on
 let playhead = 0, playing = false;
 const jobs = new Map();
-let exportJobId = null;
 
 const vid = el('vid'), overlay = el('overlay');
 let octx = overlay.getContext('2d');   // reassignable: export rasterises objects to an OffscreenCanvas using these same draw fns
@@ -613,18 +612,44 @@ function duplicateSel(){ if(selection.kind==='clip'){ const c=findClipById(selec
 function deleteSel(){ if(selection.kind==='clip'){ commit('remove_clip',{clipId:selection.id}); select(null); } else if(selection.kind==='object'){ commit('remove_object',{id:selection.id}); select(null); } else if(selection.kind==='multi'){ for(const id of selection.ids) rpc('remove_object',{id}); select(null); } }
 function commit(method,params){ interacting=false; return rpc(method,params).catch(()=>{}); }
 
-function setExportOverlay(job){
-  const blocker=el('exportBlocker'); if(!blocker) return;
-  if(!job){ blocker.classList.add('hidden'); exportJobId=null; return; }
-  exportJobId=job.id;
-  blocker.classList.remove('hidden');
-  const pct=Math.round((job.progress||0)*100);
-  el('exportProgress').style.width=pct+'%';
-  const pctEl=el('exportPct'); if(pctEl) pctEl.textContent=pct+'%';
-  el('exportDetail').textContent=job.detail||job.label||'Working…';
+function openExportDialog(){
+  pause();
+  // Pre-select quality that best matches the current project height.
+  const qualityOpts=[480,720,1080,1440,2160]; let bestQ=720;
+  for(const q of qualityOpts){ if(PH<=q){ bestQ=q; break; } }
+  const radio=document.querySelector(`input[name="exportQuality"][value="${bestQ}"]`);
+  if(radio) radio.checked=true;
+  el('exportDlgStep1').classList.remove('hidden'); el('exportDlgStep2').classList.add('hidden');
+  el('dlgStep1Ind').classList.add('active'); el('dlgStep2Ind').classList.remove('active');
+  el('exportDialog').classList.remove('hidden');
 }
-function startExport(){ pause(); setExportOverlay({id:'pending',progress:0,detail:'Preparing export'}); rpc('export',{}).then(r=>{ exportJobId=r.jobId; setStatus('Export started → '+r.out); }).catch(()=>setExportOverlay(null)); }
-function cancelExport(){ if(exportJobId) rpc('cancel_job',{jobId:exportJobId}).catch(()=>{}); }
+function closeExportDialog(){ el('exportDialog').classList.add('hidden'); }
+async function browseExportPath(){
+  const ts=Date.now();
+  const p=await window.kx.pickExportPath({defaultName:`export_${ts}.mp4`});
+  if(p) el('exportPath').value=p;
+}
+function goToExportStep2(){
+  const fps=Math.min(120,Math.max(12,parseInt(el('exportFps').value)||30));
+  el('exportFps').value=fps;
+  const quality=(document.querySelector('input[name="exportQuality"]:checked')||{}).value||'720';
+  const QLABELS={'480':'480p SD','720':'720p HD','1080':'1080p Full HD','1440':'1440p 2K','2160':'2160p 4K'};
+  const outPath=el('exportPath').value.trim()||'(default export folder)';
+  el('revPath').textContent=outPath; el('revQuality').textContent=QLABELS[quality]||quality+'p'; el('revFps').textContent=fps+' fps';
+  el('exportDlgStep1').classList.add('hidden'); el('exportDlgStep2').classList.remove('hidden');
+  el('dlgStep1Ind').classList.remove('active'); el('dlgStep2Ind').classList.add('active');
+}
+function goToExportStep1(){
+  el('exportDlgStep2').classList.add('hidden'); el('exportDlgStep1').classList.remove('hidden');
+  el('dlgStep1Ind').classList.add('active'); el('dlgStep2Ind').classList.remove('active');
+}
+function submitExport(){
+  const quality=parseInt((document.querySelector('input[name="exportQuality"]:checked')||{}).value||'720');
+  const fps=Math.min(120,Math.max(12,parseInt(el('exportFps').value)||30));
+  const outPath=el('exportPath').value.trim()||null;
+  closeExportDialog();
+  rpc('export',{outPath,fps,quality}).then(r=>setStatus('Export started → '+r.out)).catch(e=>setStatus('⚠ Export failed: '+e.message));
+}
 function saveProject(){ window.kx.saveProjectAs().then(path=>{ if(path) rpc('save_project',{path}).then(r=>setStatus('Project saved → '+r.path)).catch(()=>{}); }); }
 function openProject(){ window.kx.pickProject().then(path=>{ if(path) rpc('load_project',{path}).then(()=>{ select(null); seekTo(0); setStatus('Project opened → '+path); }).catch(()=>{}); }); }
 
@@ -636,7 +661,7 @@ function applyState(s){ state=s; if(!state.resolution) state.resolution={w:1280,
   fitWorking(); syncResUI();
   renderTabs(); renderSection(); renderTimeline(); renderInspector(); renderLayers(); el('btnUndo').disabled=!s.canUndo; el('btnRedo').disabled=!s.canRedo; if(!playing) seekTo(playhead); }
 window.kx.onState((s)=>{ if(interacting){ pendingState=s; return; } applyState(s); });
-window.kx.onJob((j)=>{ jobs.set(j.id,j); if(activeSection==='media'&&['preview','thumbnail','sample','audio'].includes(j.type)&&j.status==='done') renderSection(); if(j.type==='export'&&(j.id===exportJobId||exportJobId==='pending')) setExportOverlay(j); if(j.status==='done'&&j.type==='export'){ setExportOverlay(null); setStatus('Export complete → '+(j.result&&j.result.out)); } if(j.status==='canceled'&&j.type==='export'){ setExportOverlay(null); setStatus('Export canceled.'); } if(j.status==='error'){ if(j.type==='export') setExportOverlay(null); setStatus('⚠ '+j.label+': '+j.error); } });
+window.kx.onJob((j)=>{ jobs.set(j.id,j); if(activeSection==='media'&&['preview','thumbnail','sample','audio'].includes(j.type)&&j.status==='done') renderSection(); if(j.status==='done'&&j.type==='export'){ setStatus('Export complete → '+(j.result&&j.result.out)); } if(j.status==='canceled'&&j.type==='export'){ setStatus('Export canceled.'); } if(j.status==='error'){ setStatus('⚠ '+j.label+': '+j.error); } });
 setInterval(()=>{ if(!interacting&&pendingState){ const s=pendingState; pendingState=null; applyState(s); } },80);
 
 // ===================================================== PREVIEW ZOOM + PAN (Camtasia-style)
@@ -693,7 +718,8 @@ window.addEventListener('mousemove',e=>{ if(!pvPanDrag) return; previewPanX=e.cl
 window.addEventListener('mouseup',e=>{ if(!pvPanDrag) return; pvPanDrag=null; applyPreviewTransform(); });
 
 // ===================================================== TOOLBAR + KEYS
-el('btnSplit').onclick=splitSel; el('btnDup').onclick=duplicateSel; el('btnDel').onclick=deleteSel; el('btnUndo').onclick=()=>rpc('undo'); el('btnRedo').onclick=()=>rpc('redo'); el('btnOpenProject').onclick=openProject; el('btnSaveProject').onclick=saveProject; el('btnExport').onclick=startExport; el('btnCancelExport').onclick=cancelExport; el('btnPlay').onclick=togglePlay; el('btnStop').onclick=stop;
+el('btnSplit').onclick=splitSel; el('btnDup').onclick=duplicateSel; el('btnDel').onclick=deleteSel; el('btnUndo').onclick=()=>rpc('undo'); el('btnRedo').onclick=()=>rpc('redo'); el('btnOpenProject').onclick=openProject; el('btnSaveProject').onclick=saveProject; el('btnExport').onclick=openExportDialog; el('btnPlay').onclick=togglePlay; el('btnStop').onclick=stop;
+el('btnBrowseExport').onclick=browseExportPath; el('btnExportDlgNext').onclick=goToExportStep2; el('btnExportDlgBack').onclick=goToExportStep1; el('btnExportDlgCancel').onclick=closeExportDialog; el('btnStartExport').onclick=submitExport;
 window.addEventListener('keydown',(e)=>{ const typing=/INPUT|TEXTAREA|SELECT/.test(document.activeElement&&document.activeElement.tagName); if(typing) return;
   if(e.code==='Space'){ e.preventDefault(); togglePlay(); } else if(e.key==='s'||e.key==='S'){ splitSel(); } else if((e.ctrlKey||e.metaKey)&&e.key==='d'){ e.preventDefault(); duplicateSel(); } else if(e.key==='Delete'||e.key==='Backspace'){ deleteSel(); } else if((e.ctrlKey||e.metaKey)&&e.key==='z'){ rpc('undo'); } else if((e.ctrlKey||e.metaKey)&&(e.key==='y'||(e.shiftKey&&(e.key==='Z'||e.key==='z')))){ rpc('redo'); } });
 

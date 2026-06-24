@@ -14,6 +14,15 @@ const { startMcpHttpServer, MCP_HTTP_PORT } = require('./mcp/server');
 
 let win = null;
 let engine = null;
+let exportWin = null;
+let exportJobForwarder = null;
+
+// Prevent Chromium from throttling the renderer when the window is minimised or
+// hidden. Without these flags, convertToBlob() drops to ~1 fps in background,
+// turning a 5-second export into a 6-minute export.
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 
 // One app instance only — avoids multiple engines fighting over the control file.
 if (!app.requestSingleInstanceLock()) { app.quit(); }
@@ -46,6 +55,10 @@ async function createWindow() {
     },
   });
 
+  // Ensure the renderer is never throttled — critical for overlay frame rasterisation
+  // during export, which runs inside this webContents even when the window is minimised.
+  win.webContents.setBackgroundThrottling(false);
+
   win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
 
   // Surface renderer console + crashes in the main log (useful for diagnostics).
@@ -57,7 +70,9 @@ async function createWindow() {
 
   // Push engine events to the renderer (so MCP-driven edits show up live too).
   engine.on('state', s => { if (win && !win.isDestroyed()) win.webContents.send('state', s); });
-  engine.on('job', j => { if (win && !win.isDestroyed()) win.webContents.send('job', j); });
+  engine.on('job', j => {
+    if (win && !win.isDestroyed()) win.webContents.send('job', j);
+  });
 
   // Hook renderer as overlay frame renderer for exports.
   engine.setOverlayRenderer(({ fps, total, onProgress }) => new Promise((resolve, reject) => {
@@ -72,6 +87,51 @@ async function createWindow() {
   }));
 
   win.on('closed', () => { win = null; });
+}
+
+function openExportWidget(jobId) {
+  if (exportWin && !exportWin.isDestroyed()) { exportWin.focus(); return; }
+
+  const [wx, wy] = win.getPosition();
+  const [ww, wh] = win.getSize();
+  const wW = 420, wH = 130;
+
+  exportWin = new BrowserWindow({
+    width: wW, height: wH,
+    x: Math.round(wx + ww / 2 - wW / 2),
+    y: Math.round(wy + wh / 2 - wH / 2),
+    frame: false,
+    alwaysOnTop: true,
+    resizable: false,
+    skipTaskbar: true,
+    backgroundColor: '#16181D',
+    title: 'Kninix — Exporting',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+
+  exportWin.loadFile(path.join(__dirname, '..', 'renderer', 'export-progress.html'), {
+    hash: `jobId=${jobId}`,
+  });
+
+  // Forward job events to the widget window.
+  exportJobForwarder = (j) => {
+    if (exportWin && !exportWin.isDestroyed()) exportWin.webContents.send('job', j);
+  };
+  engine.on('job', exportJobForwarder);
+
+  // Minimise the main window so only the compact widget is visible.
+  win.minimize();
+
+  exportWin.on('closed', () => {
+    if (exportJobForwarder) { engine.removeListener('job', exportJobForwarder); exportJobForwarder = null; }
+    exportWin = null;
+    if (win && !win.isDestroyed()) { win.restore(); win.focus(); }
+  });
 }
 
 // ---- IPC: the renderer's single command channel ----
@@ -92,8 +152,20 @@ ipcMain.on('render-overlay-done', (_e, { id, result, error }) => {
 });
 
 ipcMain.handle('rpc', async (_e, { method, params }) => {
-  try { return { ok: true, result: await engine.dispatch(method, params) }; }
+  try {
+    const result = await engine.dispatch(method, params);
+    if (method === 'export' && result && result.jobId) openExportWidget(result.jobId);
+    return { ok: true, result };
+  }
   catch (err) { return { ok: false, error: String((err && err.message) || err) }; }
+});
+
+ipcMain.handle('pick-export-path', async (_e, { defaultName } = {}) => {
+  const r = await dialog.showSaveDialog(win, {
+    defaultPath: defaultName || 'export.mp4',
+    filters: [{ name: 'MP4 Video', extensions: ['mp4'] }],
+  });
+  return r.canceled ? null : r.filePath;
 });
 
 ipcMain.handle('pick-file', async () => {

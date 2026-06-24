@@ -94,13 +94,67 @@
     <span class="muted">Claude/MCP: <code>npm run mcp</code> · same project</span>
   </footer>
 
-  <div class="export-blocker hidden" id="exportBlocker">
-    <div class="export-card">
-      <div class="export-title">Exporting video</div>
-      <div class="export-pct" id="exportPct">0%</div>
-      <div class="export-progress"><div id="exportProgress"></div></div>
-      <div class="export-detail" id="exportDetail">Preparing…</div>
-      <button class="btn del" id="btnCancelExport">Cancel</button>
+  <!-- Export Settings Dialog (Camtasia-style two-step panel) -->
+  <div class="export-dialog hidden" id="exportDialog">
+    <div class="export-dlg-card">
+
+      <div class="export-dlg-steps">
+        <span class="export-step active" id="dlgStep1Ind">1 · Settings</span>
+        <span class="export-step-sep">›</span>
+        <span class="export-step" id="dlgStep2Ind">2 · Review</span>
+      </div>
+
+      <!-- Step 1: settings -->
+      <div id="exportDlgStep1">
+        <div class="export-dlg-title">Export Video</div>
+
+        <div class="export-dlg-section">
+          <div class="export-dlg-label">Output File</div>
+          <div class="export-path-row">
+            <input type="text" id="exportPath" class="export-path-input" placeholder="Default export folder" readonly />
+            <button class="btn" id="btnBrowseExport">Browse…</button>
+          </div>
+        </div>
+
+        <div class="export-dlg-section">
+          <div class="export-dlg-label">Resolution / Quality</div>
+          <div class="export-quality-grid">
+            <label class="quality-opt"><input type="radio" name="exportQuality" value="480" /><div class="qcard"><b>480p</b><span>SD</span></div></label>
+            <label class="quality-opt"><input type="radio" name="exportQuality" value="720" checked /><div class="qcard"><b>720p</b><span>HD</span></div></label>
+            <label class="quality-opt"><input type="radio" name="exportQuality" value="1080" /><div class="qcard"><b>1080p</b><span>Full HD</span></div></label>
+            <label class="quality-opt"><input type="radio" name="exportQuality" value="1440" /><div class="qcard"><b>1440p</b><span>2K</span></div></label>
+            <label class="quality-opt"><input type="radio" name="exportQuality" value="2160" /><div class="qcard"><b>2160p</b><span>4K</span></div></label>
+          </div>
+        </div>
+
+        <div class="export-dlg-section">
+          <div class="export-dlg-label">Frame Rate</div>
+          <div class="export-fps-row">
+            <input type="number" id="exportFps" value="30" min="12" max="120" step="1" class="export-fps-input" />
+            <span class="muted small">fps · range 12 – 120</span>
+          </div>
+        </div>
+
+        <div class="export-dlg-actions">
+          <button class="btn ghost" id="btnExportDlgCancel">Cancel</button>
+          <button class="btn accent" id="btnExportDlgNext">Next →</button>
+        </div>
+      </div>
+
+      <!-- Step 2: review & confirm -->
+      <div id="exportDlgStep2" class="hidden">
+        <div class="export-dlg-title">Ready to Export</div>
+        <div class="export-review">
+          <div class="review-row"><span class="rlabel">Output</span><span class="rval" id="revPath">—</span></div>
+          <div class="review-row"><span class="rlabel">Quality</span><span class="rval" id="revQuality">—</span></div>
+          <div class="review-row"><span class="rlabel">Frame rate</span><span class="rval" id="revFps">—</span></div>
+        </div>
+        <div class="export-dlg-actions">
+          <button class="btn ghost" id="btnExportDlgBack">← Back</button>
+          <button class="btn accent" id="btnStartExport">▶ Start Export</button>
+        </div>
+      </div>
+
     </div>
   </div>
 
