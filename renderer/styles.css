@@ -96,6 +96,22 @@ b { font-variant-numeric:tabular-nums; }
 .cropwin { position:absolute; pointer-events:none; z-index:3; box-shadow:0 0 0 9999px rgba(8,9,12,.62); outline:1px solid rgba(255,255,255,.30); }
 .noclip { position:absolute; display:grid; place-items:center; color:var(--text-3); font-size:13px; pointer-events:none; z-index:4; }
 
+/* fullscreen "watch the final cut" preview — the viewport fills the screen, the working
+   margins are clipped away (overflow:hidden) so only the export crop region shows. */
+.viewport:fullscreen { background:#000; cursor:none; }
+.viewport:fullscreen.show-ctrl { cursor:default; }
+.viewport:fullscreen .cropwin, .viewport:fullscreen .noclip { display:none; }  /* no editor chrome */
+.fs-bar { position:absolute; left:50%; bottom:26px; transform:translateX(-50%); z-index:20;
+  display:none; align-items:center; gap:14px; padding:9px 16px; border-radius:14px;
+  background:rgba(16,18,24,.82); backdrop-filter:blur(10px); border:1px solid rgba(255,255,255,.12);
+  box-shadow:0 10px 34px rgba(0,0,0,.55); opacity:0; transition:opacity .2s; pointer-events:none; }
+.viewport:fullscreen .fs-bar { display:flex; }
+.viewport:fullscreen.show-ctrl .fs-bar { opacity:1; pointer-events:auto; }
+.fs-btn { background:none; border:none; color:#fff; font-size:18px; line-height:1; cursor:pointer; padding:5px 9px; border-radius:7px; }
+.fs-btn:hover { background:rgba(255,255,255,.16); }
+.fs-time { color:#cfd6e4; font-size:12px; font-variant-numeric:tabular-nums; min-width:118px; text-align:center; }
+.fs-seek { width:46vw; max-width:680px; accent-color:var(--accent); cursor:pointer; }
+
 .transport { display:flex; align-items:center; gap:10px; flex:none; }
 .transport .time { font-variant-numeric:tabular-nums; color:var(--text-2); } .transport .time b { color:var(--text); }
 .transport input[type=range] { width:160px; accent-color:var(--accent); }

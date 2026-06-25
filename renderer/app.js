@@ -26,6 +26,7 @@ let state = { media:{}, tracks:[], objects:[], resolution:{w:1280,h:720}, frame:
 let selection = { kind:null, id:null, ids:[] };
 let activeTrackId = null;   // which numbered track new media/overlays land on
 let playhead = 0, playing = false;
+let fsMode = false;   // true while the fullscreen "watch the final cut" preview is active
 const jobs = new Map();
 
 const vid = el('vid'), overlay = el('overlay');
@@ -121,6 +122,7 @@ function seekTo(time){ playhead=Math.max(0,Math.min(time,Math.max(totalDuration(
   syncVideo(false);
   const ac=clipAt(playhead); vid.style.filter=ac?(FILTER_CSS[ac.filter||'none']||''):'';
   drawOverlay(); el('tcur').textContent=fmt(playhead); el('tdur').textContent=fmt(totalDuration()); positionPlayhead();
+  if(fsMode) syncFSBar();
   requestAnimationFrame(loop);
 })();
 function positionPlayhead(){ const ph=el('playhead'); ph.style.left=(playhead*pxPerSec)+'px'; ph.style.height=(22+el('tracks').offsetHeight)+'px'; }
@@ -166,7 +168,8 @@ function drawOverlay(){
   for(const t of trks){ const c=activeClipOf(t); if(c) drawMediaClip(c); for(const o of objsOfTrack(t.id,t.id===topId)){ if(objVisible(o)) drawObject(o); } }
   // clip transition (dip to black/white) over the export frame
   const tr=clipTrans(); if(tr.a>0){ octx.globalAlpha=tr.a; octx.fillStyle=tr.color; octx.fillRect(0,0,PW,PH); octx.globalAlpha=1; }
-  // selection chrome
+  // selection chrome — hidden in fullscreen "watch" mode (clean output only)
+  if(fsMode){ return; }
   if(selection.kind==='object'){ const o=findObj(selection.id); if(o&&objVisible(o)) drawHandles(o,true); }
   else if(selection.kind==='clip'){ const c=findClipById(selection.id); if(c&&c.rect) drawHandles(c.rect,true); }
   else if(selection.kind==='multi'){ for(const id of selection.ids){ const o=findObj(id); if(o&&objVisible(o)) drawHandles(o,false); } }
@@ -395,9 +398,9 @@ function addDroppedItem(payload,trackId,at){
   if(payload.kind==='widget') return rpc('add_widget',withTime(payload.params,trackId,at)).then(o=>{ select('object',o.id); setStatus('Added to Track'); });
   if(payload.kind==='object') return rpc('add_object',withTime(payload.params,trackId,at)).then(o=>{ select('object',o.id); setStatus('Added to Track'); });
 }
-function trackLane(tr,num,isTop){ const lane=document.createElement('div'); lane.className='lane'+(tr.id===activeTrackId?' active':''); lane.dataset.kind='track'; lane.innerHTML=`<span class="lane-label">Track ${num}</span>`;
-  for(const c of tr.clips){ const n=clipNode(c); n.addEventListener('mousedown',(ev)=>onClipDown(ev,c,n)); lane.appendChild(n); }
-  for(const o of (state.objects||[]).filter(o=>o.trackId===tr.id||(isTop&&!o.trackId))){ const b=objNode(o); b.addEventListener('mousedown',(ev)=>onObjBlockDown(ev,o,b)); lane.appendChild(b); }
+function trackLane(tr,num,isTop){ const lane=document.createElement('div'); lane.className='lane'+(tr.id===activeTrackId?' active':''); lane.dataset.kind='track'; lane.dataset.trackId=tr.id; lane.innerHTML=`<span class="lane-label">Track ${num}</span>`;
+  for(const c of tr.clips){ const n=clipNode(c); n.dataset.trackId=tr.id; n.addEventListener('mousedown',(ev)=>onClipDown(ev,c,n)); lane.appendChild(n); }
+  for(const o of (state.objects||[]).filter(o=>o.trackId===tr.id||(isTop&&!o.trackId))){ const b=objNode(o); b.dataset.trackId=o.trackId||tr.id; b.addEventListener('mousedown',(ev)=>onObjBlockDown(ev,o,b)); lane.appendChild(b); }
   lane.addEventListener('mousedown',(ev)=>{ if(ev.target===lane||ev.target.classList.contains('lane-label')){ setActiveTrack(tr.id); select(null); pause(); scrub(ev); } });
   lane.addEventListener('dragover',(ev)=>{ const t=ev.dataTransfer.types; if(t&&(t.includes('application/x-kninix-item')||t.includes('text/plain'))){ ev.preventDefault(); lane.classList.add('drop'); ev.dataTransfer.dropEffect='copy'; } });
   lane.addEventListener('dragleave',()=>lane.classList.remove('drop'));
@@ -405,13 +408,25 @@ function trackLane(tr,num,isTop){ const lane=document.createElement('div'); lane
   return lane; }
 function setActiveTrack(id){ activeTrackId=id; renderTimeline(); }
 
+// While dragging a timeline block, find the lane under the cursor (the dragged node has
+// pointer-events disabled so elementFromPoint sees through it) → enables cross-track moves.
+function laneUnder(e){ const t=document.elementFromPoint(e.clientX,e.clientY); return t?t.closest('.lane'):null; }
+function clearLaneDrop(){ for(const l of el('tracks').querySelectorAll('.lane.drop')) l.classList.remove('drop'); }
 function onClipDown(ev,clip,node){ ev.stopPropagation(); select('clip',clip.id); const edge=ev.target.classList.contains('edge')?(ev.target.classList.contains('l')?'l':'r'):null; interacting=true; const x0=ev.clientX,g={tin:clip.timelineIn,sin:clip.sourceIn,sout:clip.sourceOut}; const m=state.media[clip.mediaId],maxDur=(m&&!m.isImage)?m.duration:1e9;
-  const move=(e)=>{ const dt=(e.clientX-x0)/pxPerSec; if(!edge){ const nin=Math.max(0,g.tin+dt); node.style.left=(nin*pxPerSec)+'px'; node._nin=nin; } else if(edge==='r'){ const ns=Math.min(maxDur,Math.max(g.sin+0.1,g.sout+dt)); node._nsout=ns; node.style.width=Math.max(10,(ns-g.sin)*pxPerSec)+'px'; } else { const ns=Math.min(g.sout-0.1,Math.max(0,g.sin+dt)); node._nsin=ns; node.style.width=Math.max(10,(g.sout-ns)*pxPerSec)+'px'; } };
-  const up=()=>{ window.removeEventListener('mousemove',move); window.removeEventListener('mouseup',up); if(!edge&&node._nin!=null)commit('move_clip',{clipId:clip.id,at:+node._nin.toFixed(3)}); else if(edge==='r'&&node._nsout!=null)commit('trim_clip',{clipId:clip.id,sourceOut:+node._nsout.toFixed(3)}); else if(edge==='l'&&node._nsin!=null)commit('trim_clip',{clipId:clip.id,sourceIn:+node._nsin.toFixed(3)}); else interacting=false; };
+  const srcTrackId=node.dataset.trackId; let destTrackId=srcTrackId; if(!edge) node.style.pointerEvents='none';
+  const move=(e)=>{ const dt=(e.clientX-x0)/pxPerSec; if(!edge){ const nin=Math.max(0,g.tin+dt); node.style.left=(nin*pxPerSec)+'px'; node._nin=nin;
+      const lane=laneUnder(e), tid=lane?lane.dataset.trackId:srcTrackId; if(tid!==destTrackId){ clearLaneDrop(); if(lane&&tid!==srcTrackId) lane.classList.add('drop'); destTrackId=tid; }
+    } else if(edge==='r'){ const ns=Math.min(maxDur,Math.max(g.sin+0.1,g.sout+dt)); node._nsout=ns; node.style.width=Math.max(10,(ns-g.sin)*pxPerSec)+'px'; } else { const ns=Math.min(g.sout-0.1,Math.max(0,g.sin+dt)); node._nsin=ns; node.style.width=Math.max(10,(g.sout-ns)*pxPerSec)+'px'; } };
+  const up=()=>{ window.removeEventListener('mousemove',move); window.removeEventListener('mouseup',up); node.style.pointerEvents=''; clearLaneDrop();
+    if(!edge&&node._nin!=null){ const params={clipId:clip.id,at:+node._nin.toFixed(3)}; if(destTrackId&&destTrackId!==srcTrackId) params.trackId=destTrackId; commit('move_clip',params); }
+    else if(edge==='r'&&node._nsout!=null)commit('trim_clip',{clipId:clip.id,sourceOut:+node._nsout.toFixed(3)}); else if(edge==='l'&&node._nsin!=null)commit('trim_clip',{clipId:clip.id,sourceIn:+node._nsin.toFixed(3)}); else interacting=false; };
   window.addEventListener('mousemove',move); window.addEventListener('mouseup',up); }
 function onObjBlockDown(ev,obj,node){ ev.stopPropagation(); select('object',obj.id); interacting=true; const x0=ev.clientX,g={start:obj.start||0,end:obj.end||0,len:(obj.end||0)-(obj.start||0)}; const edge=ev.target.classList.contains('edge')?(ev.target.classList.contains('l')?'l':'r'):null;
-  const move=(e)=>{ const dt=(e.clientX-x0)/pxPerSec; if(!edge){ const ns=Math.max(0,g.start+dt); node.style.left=(ns*pxPerSec)+'px'; node._ns=ns; node._ne=ns+g.len; } else if(edge==='r'){ const ne=Math.max(g.start+0.2,g.end+dt); node._ne=ne; node.style.width=Math.max(20,(ne-g.start)*pxPerSec)+'px'; } else { const ns=Math.max(0,Math.min(g.end-0.2,g.start+dt)); node._ns=ns; node.style.left=(ns*pxPerSec)+'px'; node.style.width=Math.max(20,(g.end-ns)*pxPerSec)+'px'; } };
-  const up=()=>{ window.removeEventListener('mousemove',move); window.removeEventListener('mouseup',up); const patch={}; if(node._ns!=null)patch.start=+node._ns.toFixed(3); if(node._ne!=null)patch.end=+node._ne.toFixed(3); if(Object.keys(patch).length)commit('update_object',{id:obj.id,patch}); else interacting=false; };
+  const srcTrackId=node.dataset.trackId; let destTrackId=srcTrackId; if(!edge) node.style.pointerEvents='none';
+  const move=(e)=>{ const dt=(e.clientX-x0)/pxPerSec; if(!edge){ const ns=Math.max(0,g.start+dt); node.style.left=(ns*pxPerSec)+'px'; node._ns=ns; node._ne=ns+g.len;
+      const lane=laneUnder(e), tid=lane?lane.dataset.trackId:srcTrackId; if(tid!==destTrackId){ clearLaneDrop(); if(lane&&tid!==srcTrackId) lane.classList.add('drop'); destTrackId=tid; }
+    } else if(edge==='r'){ const ne=Math.max(g.start+0.2,g.end+dt); node._ne=ne; node.style.width=Math.max(20,(ne-g.start)*pxPerSec)+'px'; } else { const ns=Math.max(0,Math.min(g.end-0.2,g.start+dt)); node._ns=ns; node.style.left=(ns*pxPerSec)+'px'; node.style.width=Math.max(20,(g.end-ns)*pxPerSec)+'px'; } };
+  const up=()=>{ window.removeEventListener('mousemove',move); window.removeEventListener('mouseup',up); node.style.pointerEvents=''; clearLaneDrop(); const patch={}; if(node._ns!=null)patch.start=+node._ns.toFixed(3); if(node._ne!=null)patch.end=+node._ne.toFixed(3); if(destTrackId&&destTrackId!==srcTrackId) patch.trackId=destTrackId; if(Object.keys(patch).length)commit('update_object',{id:obj.id,patch}); else interacting=false; };
   window.addEventListener('mousemove',move); window.addEventListener('mouseup',up); }
 function scrub(ev){ const r=el('timeline').getBoundingClientRect(); const x=ev.clientX-r.left+el('timeline').scrollLeft; seekTo(x/pxPerSec); }
 el('ruler').addEventListener('mousedown',(ev)=>{ pause(); scrub(ev); const mv=(e)=>scrub(e),up=()=>{window.removeEventListener('mousemove',mv);window.removeEventListener('mouseup',up);}; window.addEventListener('mousemove',mv); window.addEventListener('mouseup',up); });
@@ -717,11 +732,59 @@ el('viewport').addEventListener('mousedown',e=>{
 window.addEventListener('mousemove',e=>{ if(!pvPanDrag) return; previewPanX=e.clientX-pvPanDrag.sx; previewPanY=e.clientY-pvPanDrag.sy; applyPreviewTransform(); });
 window.addEventListener('mouseup',e=>{ if(!pvPanDrag) return; pvPanDrag=null; applyPreviewTransform(); });
 
+// ===================================================== FULLSCREEN PREVIEW
+// "Watch the final cut" — the viewport goes fullscreen and the working canvas is re-fitted
+// so ONLY the export crop region fills the screen (the 28% working margins overflow and are
+// clipped by the viewport's overflow:hidden). Playback, overlays, captions and transitions
+// all run through the SAME rAF compositor as the editor, so this is a true WYSIWYG preview
+// of what will export — no render, no file written.
+let fsHideTimer=null, fsSeeking=false;
+function isFS(){ return document.fullscreenElement===el('viewport'); }
+// Size the frame so the EXPORT crop (PW×PH) — not the working area — fills the screen.
+// Margins are symmetric, so the crop stays centred via the viewport's place-items:center.
+function fitFullscreen(){ const vp=el('viewport'), fr=el('frame'); if(!vp||!fr) return;
+  const availW=vp.clientWidth, availH=vp.clientHeight, ar=PW/PH; if(!availW||!availH) return;
+  let w=availW, h=w/ar; if(h>availH){ h=availH; w=h*ar; }
+  const scale=w/PW;
+  fr.style.width=Math.round(workW*scale)+'px'; fr.style.height=Math.round(workH*scale)+'px';
+  placeCropWin(); }
+function showFSControls(){ const vp=el('viewport'); if(!fsMode) return; vp.classList.add('show-ctrl');
+  clearTimeout(fsHideTimer); fsHideTimer=setTimeout(()=>{ if(playing) vp.classList.remove('show-ctrl'); }, 2600); }
+function syncFSBar(){ const sk=el('fsSeek'); if(!sk) return; const dur=Math.max(totalDuration(),0.001);
+  if(!fsSeeking) sk.value=String(Math.round(playhead/dur*1000));
+  el('fsTime').textContent=fmt(playhead)+' / '+fmt(totalDuration()); el('fsPlay').textContent=playing?'⏸':'▶'; }
+async function enterPreviewFS(){ if(totalDuration()<=0){ setStatus('Timeline is empty — add media first.'); return; }
+  try{ await el('viewport').requestFullscreen(); }catch(e){ setStatus('⚠ Fullscreen blocked: '+e.message); } }
+function exitPreviewFS(){ if(document.fullscreenElement) document.exitFullscreen().catch(()=>{}); }
+function togglePreviewFS(){ fsMode?exitPreviewFS():enterPreviewFS(); }
+document.addEventListener('fullscreenchange', ()=>{
+  if(isFS()){
+    fsMode=true; previewZoom=1; previewPanX=0; previewPanY=0; applyPreviewTransform();
+    fitFullscreen(); if(playhead>=totalDuration()-1e-3) seekTo(0); play(); showFSControls(); syncFSBar();
+  } else if(fsMode){
+    fsMode=false; pause(); el('viewport').classList.remove('show-ctrl'); fitWorking();
+  }
+});
+// control bar wiring
+(function(){ const sk=el('fsSeek'), pl=el('fsPlay'), ex=el('fsExit'); if(!sk) return;
+  pl.onclick=()=>{ togglePlay(); syncFSBar(); showFSControls(); };
+  ex.onclick=exitPreviewFS;
+  sk.addEventListener('input', ()=>{ fsSeeking=true; const dur=Math.max(totalDuration(),0.001);
+    seekTo(+sk.value/1000*dur); el('fsTime').textContent=fmt(playhead)+' / '+fmt(totalDuration()); });
+  sk.addEventListener('change', ()=>{ fsSeeking=false; });
+})();
+el('viewport').addEventListener('mousemove', ()=>{ if(fsMode) showFSControls(); });
+if(el('btnPreviewFS')) el('btnPreviewFS').onclick=enterPreviewFS;
+
 // ===================================================== TOOLBAR + KEYS
 el('btnSplit').onclick=splitSel; el('btnDup').onclick=duplicateSel; el('btnDel').onclick=deleteSel; el('btnUndo').onclick=()=>rpc('undo'); el('btnRedo').onclick=()=>rpc('redo'); el('btnOpenProject').onclick=openProject; el('btnSaveProject').onclick=saveProject; el('btnExport').onclick=openExportDialog; el('btnPlay').onclick=togglePlay; el('btnStop').onclick=stop;
 el('btnBrowseExport').onclick=browseExportPath; el('btnExportDlgNext').onclick=goToExportStep2; el('btnExportDlgBack').onclick=goToExportStep1; el('btnExportDlgCancel').onclick=closeExportDialog; el('btnStartExport').onclick=submitExport;
 window.addEventListener('keydown',(e)=>{ const typing=/INPUT|TEXTAREA|SELECT/.test(document.activeElement&&document.activeElement.tagName); if(typing) return;
-  if(e.code==='Space'){ e.preventDefault(); togglePlay(); } else if(e.key==='s'||e.key==='S'){ splitSel(); } else if((e.ctrlKey||e.metaKey)&&e.key==='d'){ e.preventDefault(); duplicateSel(); } else if(e.key==='Delete'||e.key==='Backspace'){ deleteSel(); } else if((e.ctrlKey||e.metaKey)&&e.key==='z'){ rpc('undo'); } else if((e.ctrlKey||e.metaKey)&&(e.key==='y'||(e.shiftKey&&(e.key==='Z'||e.key==='z')))){ rpc('redo'); } });
+  if(e.code==='Space'){ e.preventDefault(); togglePlay(); if(fsMode) showFSControls(); }
+  else if(e.key==='f'||e.key==='F'){ e.preventDefault(); togglePreviewFS(); }
+  else if(fsMode&&e.key==='ArrowLeft'){ e.preventDefault(); seekTo(playhead-5); showFSControls(); }
+  else if(fsMode&&e.key==='ArrowRight'){ e.preventDefault(); seekTo(playhead+5); showFSControls(); }
+  else if(e.key==='s'||e.key==='S'){ splitSel(); } else if((e.ctrlKey||e.metaKey)&&e.key==='d'){ e.preventDefault(); duplicateSel(); } else if(e.key==='Delete'||e.key==='Backspace'){ deleteSel(); } else if((e.ctrlKey||e.metaKey)&&e.key==='z'){ rpc('undo'); } else if((e.ctrlKey||e.metaKey)&&(e.key==='y'||(e.shiftKey&&(e.key==='Z'||e.key==='z')))){ rpc('redo'); } });
 
 // ===================================================== EXPORT OVERLAY RENDERER
 // Main asks us to rasterise objects on a fixed fps grid so FFmpeg can composite

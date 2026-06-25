@@ -203,17 +203,27 @@ class Project {
     return null;
   }
 
-  moveClip({ clipId, at } = {}) {
+  moveClip({ clipId, at, trackId } = {}) {
     const f = this.findClip(clipId);
     if (!f) throw new Error('No such clip: ' + clipId);
     const len = f.clip.timelineOut - f.clip.timelineIn;
-    const start = +Math.max(0, at).toFixed(3);
+    const start = +Math.max(0, at != null ? at : f.clip.timelineIn).toFixed(3);
     const end = +(start + len).toFixed(3);
-    this._assertTrackSpace(f.track.id, start, end, { clipId });
+    // Optional cross-track move: drag a clip from one track onto another.
+    const destTrack = (trackId && trackId !== f.track.id) ? this.track(trackId) : null;
+    if (trackId && trackId !== f.track.id && !destTrack) throw new Error('No such track: ' + trackId);
+    const target = destTrack || f.track;
+    this._assertTrackSpace(target.id, start, end, { clipId });
     this._checkpoint();
     f.clip.timelineIn = start;
     f.clip.timelineOut = end;
-    f.track.clips.sort((a, b) => a.timelineIn - b.timelineIn);
+    if (destTrack) {
+      f.track.clips = f.track.clips.filter(c => c.id !== clipId);
+      destTrack.clips.push(f.clip);
+      destTrack.clips.sort((a, b) => a.timelineIn - b.timelineIn);
+    } else {
+      f.track.clips.sort((a, b) => a.timelineIn - b.timelineIn);
+    }
     return f.clip;
   }
 

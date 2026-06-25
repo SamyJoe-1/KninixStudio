@@ -171,7 +171,7 @@ ipcMain.handle('pick-export-path', async (_e, { defaultName } = {}) => {
 ipcMain.handle('pick-file', async () => {
   const r = await dialog.showOpenDialog(win, {
     properties: ['openFile', 'multiSelections'],
-    filters: [{ name: 'Media', extensions: ['mp4', 'mov', 'mkv', 'webm', 'avi', 'm4v', 'mp3', 'wav', 'aac', 'm4a', 'jpg', 'jpeg', 'png'] }],
+    filters: [{ name: 'Media', extensions: ['mp4', 'mov', 'mkv', 'webm', 'avi', 'm4v', 'ts', 'm2ts', 'mts', 'mp3', 'wav', 'aac', 'm4a', 'jpg', 'jpeg', 'png'] }],
   });
   return r.canceled ? [] : r.filePaths;
 });

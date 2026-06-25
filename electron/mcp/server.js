@@ -38,9 +38,10 @@ const TOOLS = [
       trackId: { type: 'string', description: 'Optional target track id.' },
       at: { type: 'number', description: 'Optional start time (seconds).' } } } },
   { name: 'move_clip', method: 'move_clip',
-    description: 'Move a clip to a new start time (seconds).',
+    description: 'Move a clip to a new start time (seconds), and optionally onto another track.',
     inputSchema: { type: 'object', required: ['clipId', 'at'], properties: {
-      clipId: { type: 'string' }, at: { type: 'number' } } } },
+      clipId: { type: 'string' }, at: { type: 'number' },
+      trackId: { type: 'string', description: 'Optional destination track id (move the clip to another track).' } } } },
   { name: 'trim_clip', method: 'trim_clip',
     description: 'Trim a clip by setting its source in/out points (seconds).',
     inputSchema: { type: 'object', required: ['clipId'], properties: {

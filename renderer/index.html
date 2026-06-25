@@ -44,6 +44,7 @@
         <button id="pvModeSelect" class="btn pv-tool on" title="Select tool (V)">↖</button>
         <button id="pvModePan"    class="btn pv-tool"    title="Pan tool (H) · left-drag to pan canvas">✋</button>
         <span id="pvZoomLabel" class="pv-zoom-lbl" title="Click to cycle · Ctrl+Scroll · double-click resets">Fit</span>
+        <button id="btnPreviewFS" class="btn pv-tool" title="Fullscreen preview (F) — watch the final cut with every edit applied">⛶</button>
         <span class="grow"></span>
         <span class="muted small">Bright area = what exports · dimmed = cropped out</span>
       </div>
@@ -54,6 +55,13 @@
           <canvas id="overlay" width="1280" height="720"></canvas>
           <div class="cropwin" id="cropwin"></div>
           <div class="noclip" id="noclip">▶ Add a clip and press play</div>
+        </div>
+        <!-- fullscreen-only transport (auto-hides) -->
+        <div class="fs-bar" id="fsBar">
+          <button id="fsPlay" class="fs-btn" title="Play / Pause (Space)">▶</button>
+          <span class="fs-time" id="fsTime">0:00.0 / 0:00.0</span>
+          <input id="fsSeek" class="fs-seek" type="range" min="0" max="1000" value="0" title="Seek">
+          <button id="fsExit" class="fs-btn" title="Exit fullscreen (Esc)">⤡</button>
         </div>
       </div>
 
