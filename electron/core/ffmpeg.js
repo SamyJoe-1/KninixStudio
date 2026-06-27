@@ -12,6 +12,42 @@ const os = require('os');
 const FFMPEG = process.env.KX_FFMPEG || 'ffmpeg';
 const FFPROBE = process.env.KX_FFPROBE || 'ffprobe';
 
+// ---- hardware-accelerated H.264 encoder selection -------------------------------------
+// Software x264 is CPU-only and, behind a single filter_complex, leaves most cores idle.
+// We probe ffmpeg ONCE for a GPU encoder (NVIDIA → Intel → AMD) and fall back to libx264.
+// This offloads encoding to the GPU and is typically 5–15× faster. Override with
+// KX_ENCODER=libx264|h264_nvenc|h264_qsv|h264_amf (or 'auto'); presets via KX_*_PRESET.
+let _encoderCache = null;
+function encoderProfile(name) {
+  switch (name) {
+    // Quality defaults are near-transparent (~CQ 19 / CRF 18): when a render IS forced
+    // (captions, resize, fps change), the untouched parts should still look like the source.
+    case 'h264_nvenc': return { name, hw: true,  args: ['-c:v', 'h264_nvenc', '-preset', process.env.KX_NVENC_PRESET || 'p5', '-tune', 'hq', '-rc', 'vbr', '-cq', process.env.KX_CQ || '19', '-b:v', '0', '-pix_fmt', 'yuv420p'] };
+    case 'h264_qsv':   return { name, hw: true,  args: ['-c:v', 'h264_qsv', '-preset', process.env.KX_QSV_PRESET || 'veryfast', '-global_quality', process.env.KX_CQ || '19'] };
+    case 'h264_amf':   return { name, hw: true,  args: ['-c:v', 'h264_amf', '-quality', 'balanced', '-rc', 'cqp', '-qp_i', process.env.KX_CQ || '19', '-qp_p', process.env.KX_CQ || '19', '-pix_fmt', 'yuv420p'] };
+    default:           return { name: 'libx264', hw: false, args: ['-c:v', 'libx264', '-preset', process.env.KX_X264_PRESET || 'veryfast', '-crf', process.env.KX_CRF || '18', '-pix_fmt', 'yuv420p'] };
+  }
+}
+function pickVideoEncoder() {
+  if (_encoderCache) return _encoderCache;
+  const forced = process.env.KX_ENCODER;
+  let enc;
+  if (forced && forced !== 'auto') {
+    enc = encoderProfile(forced);
+  } else {
+    let list = '';
+    try { list = require('child_process').execFileSync(FFMPEG, ['-hide_banner', '-encoders'], { encoding: 'utf8' }); }
+    catch (_) { list = ''; }
+    if (list.includes('h264_nvenc')) enc = encoderProfile('h264_nvenc');
+    else if (list.includes('h264_qsv')) enc = encoderProfile('h264_qsv');
+    else if (list.includes('h264_amf')) enc = encoderProfile('h264_amf');
+    else enc = encoderProfile('libx264');
+  }
+  _encoderCache = enc;
+  process.stderr.write(`[Kninix] video encoder: ${enc.name} (${enc.hw ? 'GPU' : 'CPU'})\n`);
+  return enc;
+}
+
 function run(cmd, args, { signal, onLine } = {}) {
   return new Promise((resolve, reject) => {
     let child;
@@ -81,7 +117,41 @@ async function ffprobe(file) {
     hasAudio: !!a,
     isImage,
     kind: isImage ? 'image' : (v ? 'video' : (a ? 'audio' : 'video')),
+    // Color metadata — must be carried onto the export, otherwise the output is untagged
+    // and players guess the wrong colorspace → washed-out / desaturated picture.
+    colorRange: v ? v.color_range : undefined,
+    colorSpace: v ? v.color_space : undefined,
+    colorPrimaries: v ? v.color_primaries : undefined,
+    colorTransfer: v ? v.color_transfer : undefined,
+    pixFmt: v ? v.pix_fmt : undefined,
+    bitDepth: (v && parseInt(v.bits_per_raw_sample)) || (v && /p10|p012|p16/.test(v.pix_fmt || '') ? 10 : 8),
   };
+}
+
+// Build output color-tag args from a source's probed metadata. These TAG the output to
+// match the source so players interpret colors correctly (they don't convert pixels).
+// Unknown fields fall back to the near-universal SDR defaults (BT.709 for HD, BT.601 for SD).
+function colorInfo(media) {
+  const ok = (x) => x && x !== 'unknown' && x !== 'N/A' && x !== 'reserved';
+  const hd = ((media && media.height) || 0) >= 720;
+  return {
+    space: ok(media && media.colorSpace)     ? media.colorSpace     : (hd ? 'bt709' : 'smpte170m'),
+    prim:  ok(media && media.colorPrimaries) ? media.colorPrimaries : (hd ? 'bt709' : 'smpte170m'),
+    trc:   ok(media && media.colorTransfer)  ? media.colorTransfer  : (hd ? 'bt709' : 'smpte170m'),
+    range: ok(media && media.colorRange)     ? media.colorRange     : 'tv',
+  };
+}
+function colorArgs(media) {
+  if (!media) return [];
+  const c = colorInfo(media);
+  return ['-colorspace', c.space, '-color_primaries', c.prim, '-color_trc', c.trc, '-color_range', c.range];
+}
+// A setparams filter stamps the color metadata onto the frames themselves, which hardware
+// encoders (NVENC) honor more reliably than output -color_* flags alone.
+function colorSetparams(media) {
+  if (!media) return null;
+  const c = colorInfo(media);
+  return `setparams=range=${c.range}:colorspace=${c.space}:color_primaries=${c.prim}:color_trc=${c.trc}`;
 }
 
 // Build a parser for ffmpeg's `-progress pipe:1` key=value stream.
@@ -270,6 +340,11 @@ async function exportTimeline(project, outPath, { signal, onProgress, overlay, f
     }
   });
 
+  // Stamp the source's color metadata onto the final frames so the export matches the
+  // source instead of looking washed-out/desaturated (untagged → players guess wrong).
+  const spFilter = colorSetparams((comp.find(x => x.media && x.media.hasVideo && !x.media.isImage) || {}).media);
+  const tail = spFilter ? `,${spFilter}` : '';
+
   let ovTmpDir = null;
   if (overlay && overlay.frames && overlay.frames.length) {
     // ── PNG overlay path: pixel-perfect, identical to the editor preview ────
@@ -279,17 +354,20 @@ async function exportTimeline(project, outPath, { signal, onProgress, overlay, f
     ovTmpDir = path.join(os.tmpdir(), `kx_ov_${Date.now()}`);
     fs.mkdirSync(ovTmpDir, { recursive: true });
     // Write all frames concurrently instead of one-by-one — for 150+ frames this
-    // can cut disk-write time from several seconds to under one second.
+    // can cut disk-write time from several seconds to under one second. Frames are WebP
+    // (with alpha): far cheaper to encode in the renderer and much smaller over IPC/disk
+    // than PNG, while staying visually lossless for captions/text.
+    const ovExt = overlay.ext || 'webp';
     await Promise.all(overlay.frames.map((f, i) =>
-      fs.promises.writeFile(path.join(ovTmpDir, `f${i}.png`), Buffer.from(f))
+      fs.promises.writeFile(path.join(ovTmpDir, `f${i}.${ovExt}`), Buffer.from(f))
     ));
     const ovIdx = silenceIdx + 1;
     args.push('-framerate', String(ovFps), '-start_number', '0',
-              '-i', path.join(ovTmpDir, 'f%d.png'));
+              '-i', path.join(ovTmpDir, `f%d.${ovExt}`));
     // Stretch the overlay timeline to target fps and hold the last frame to the end.
     fc.push(`[${ovIdx}:v]format=rgba,fps=${FPS},setpts=PTS-STARTPTS[ovfmt]`);
     const scaleOv = needsScale ? `scale=${scaledW}:${scaledH}:flags=lanczos,` : '';
-    fc.push(`[${last}][ovfmt]overlay=0:0:format=auto:eof_action=repeat,${scaleOv}format=yuv420p[vout]`);
+    fc.push(`[${last}][ovfmt]overlay=0:0:format=auto:eof_action=repeat,${scaleOv}format=yuv420p${tail}[vout]`);
   } else {
     // ── FFmpeg-filter fallback (no renderer, or no objects) ─────────────────
     objects.forEach(({ o }, k) => {
@@ -322,7 +400,7 @@ async function exportTimeline(project, outPath, { signal, onProgress, overlay, f
       last = out;
     });
     const scaleFb = needsScale ? `scale=${scaledW}:${scaledH}:flags=lanczos,` : '';
-    fc.push(`[${last}]${scaleFb}format=yuv420p[vout]`);
+    fc.push(`[${last}]${scaleFb}format=yuv420p${tail}[vout]`);
   }
   let aout;
   if (audioLabels.length) {
@@ -332,10 +410,17 @@ async function exportTimeline(project, outPath, { signal, onProgress, overlay, f
     aout = `${silenceIdx}:a`;
   }
 
+  // Let ffmpeg spread independent filters across cores (free; the overlay chain itself is
+  // mostly serial, but scaling/format/audio branches can run in parallel).
+  const nCores = Math.max(1, os.cpus().length);
+  args.push('-filter_complex_threads', String(nCores), '-filter_threads', String(nCores));
   args.push('-filter_complex', fc.join(';'));
   args.push('-map', '[vout]', '-map', aout, '-t', String(total));
-  args.push('-threads', '0',
-            '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+  const enc = pickVideoEncoder();
+  // Preserve the source's colorspace so the export isn't washed-out/desaturated.
+  const primarySrc = comp.find(x => x.media && x.media.hasVideo && !x.media.isImage);
+  const colorOut = primarySrc ? colorArgs(primarySrc.media) : [];
+  args.push('-threads', '0', ...enc.args, ...colorOut,
             '-c:a', 'aac', '-ar', '44100', '-ac', '2',
             '-movflags', '+faststart', '-progress', 'pipe:1', '-nostats', outPath);
 
@@ -352,16 +437,45 @@ async function exportTimeline(project, outPath, { signal, onProgress, overlay, f
 // Preview proxy: transcode ANY source to a browser-friendly H.264/yuv420p + AAC mp4 so
 // the <video> preview can play it (fixes HEVC/10-bit/odd-codec files showing audio only).
 async function makeProxy(file, outPath, { signal, onProgress, duration = 0 } = {}) {
+  const enc = pickVideoEncoder();
+  let colorOut = [];
+  try { colorOut = colorArgs(await ffprobe(file)); } catch (_) {}
   const args = [
     '-y', '-i', file,
     '-vf', "scale='min(1280,iw)':-2,format=yuv420p",
-    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
+    ...enc.args, ...colorOut,
     '-c:a', 'aac', '-ar', '44100', '-ac', '2',
     '-movflags', '+faststart',
     '-progress', 'pipe:1', '-nostats',
     outPath,
   ];
   await run(FFMPEG, args, { signal, onLine: onProgress ? progressParser(duration || 1, onProgress) : null });
+  return outPath;
+}
+
+// Lossless trim: when the export is ONLY a cut (no overlays, no resize, no fps change, no
+// fx), copy the original compressed video stream straight through — the video data is never
+// re-encoded, so the result is bit-identical to the source and finishes near-instantly.
+// Audio is re-encoded to AAC (cheap, transparent) so the MP4 container is always valid
+// regardless of the source's audio codec; the VIDEO — the user's concern — is untouched.
+// Cut points snap to the nearest keyframe at/just before sourceIn (standard for lossless).
+async function exportTrimCopy(inputPath, outPath, { sourceIn = 0, sourceOut, signal, onProgress } = {}) {
+  const dur = Math.max(0.04, (sourceOut != null ? sourceOut : 0) - sourceIn);
+  const args = [
+    '-y',
+    '-ss', String(Math.max(0, sourceIn)),   // fast input seek to nearest keyframe
+    '-i', inputPath,
+    '-t', String(dur),
+    '-map', '0:v:0', '-map', '0:a:0?',       // first video + first audio (if any)
+    '-c:v', 'copy',                          // ← original video stream, untouched
+    '-c:a', 'aac', '-b:a', '192k',
+    '-avoid_negative_ts', 'make_zero',
+    '-movflags', '+faststart',
+    '-progress', 'pipe:1', '-nostats',
+    outPath,
+  ];
+  await run(FFMPEG, args, { signal, onLine: onProgress ? progressParser(dur, onProgress) : null });
+  if (onProgress) onProgress(1, 'done');
   return outPath;
 }
 
@@ -377,4 +491,4 @@ async function generateTone(outPath, { duration = 8, freq = 330, signal, onProgr
   return outPath;
 }
 
-module.exports = { run, ffprobe, makeThumbnail, generateSample, makeProxy, generateTone, exportTimeline, FFMPEG, FFPROBE };
+module.exports = { run, ffprobe, makeThumbnail, generateSample, makeProxy, generateTone, exportTimeline, exportTrimCopy, FFMPEG, FFPROBE };

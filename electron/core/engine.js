@@ -112,7 +112,30 @@ class Engine extends EventEmitter {
     const project = data.project || data;
     this.project.loadSerialized(project);
     this._changed();
-    return this.state();
+    return Object.assign(this.state(), { repaired: this.project._lastRepaired || 0 });
+  }
+
+  // Returns the single clip iff the export is a PURE TRIM (so it can be stream-copied
+  // losslessly), else null. Conservative on purpose: any real edit disqualifies it.
+  _pureTrimClip(outW, outH, exportFps) {
+    const project = this.project;
+    if ((project.objects || []).some(o => !o.hidden)) return null;     // overlays/captions → render
+    const clips = [];
+    for (const t of (project.tracks || [])) for (const c of (t.clips || [])) clips.push(c);
+    if (clips.length !== 1) return null;
+    const c = clips[0];
+    const m = project.media[c.mediaId];
+    if (!m || m.isImage || !m.hasVideo) return null;
+    if ((c.timelineIn || 0) > 0.001) return null;                     // leading gap → render
+    if ((c.speed || 1) !== 1) return null;                            // speed change → render
+    if (c.filter && c.filter !== 'none') return null;                 // color filter → render
+    if (c.transIn && c.transIn.type && c.transIn.type !== 'none') return null;
+    if (c.transOut && c.transOut.type && c.transOut.type !== 'none') return null;
+    if (outW !== m.width || outH !== m.height) return null;            // resize → render
+    if (m.fps && Math.abs(exportFps - m.fps) > 0.5) return null;       // fps change → render
+    const r = c.rect;                                                  // crop/reposition → render
+    if (r && (Math.round(r.x) !== 0 || Math.round(r.y) !== 0 || Math.round(r.w) !== m.width || Math.round(r.h) !== m.height)) return null;
+    return c;
   }
 
   exportProject({ outPath, fps, quality, name } = {}) {
@@ -147,6 +170,21 @@ class Engine extends EventEmitter {
       type: 'export',
       label: `Export · ${path.basename(out)}`,
       run: async ({ signal, onProgress }) => {
+        // LOSSLESS PATH: if the only edit is a cut (single full-frame clip, no overlays,
+        // no fx, same resolution & fps as the source), copy the original video stream
+        // through untouched — bit-identical quality, near-instant. Anything the user
+        // actually changed (caption, resize, fps, crop, speed) falls through to a render.
+        const trim = this._pureTrimClip(outW, outH, exportFps);
+        if (trim) {
+          const media = project.media[trim.mediaId];
+          onProgress(0, 'Copying (lossless cut)…');
+          await ff.exportTrimCopy(media.path, out, {
+            sourceIn: trim.sourceIn, sourceOut: trim.sourceOut, signal,
+            onProgress: (frac) => onProgress(frac || 0, 'Copying (lossless cut)… ' + Math.round((frac || 0) * 100) + '%'),
+          });
+          return { out, lossless: true };
+        }
+
         let overlay = null;
         const objects = (project.objects || []).filter(o => !o.hidden);
         let total = 0;

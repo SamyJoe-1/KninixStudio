@@ -80,6 +80,9 @@ class Project {
     this.objects = o.objects || [];
     this.markers = o.markers || [];
     this.playhead = o.playhead || 0;
+    // Enforce the no-overlap invariant on whatever the file contained.
+    this._lastRepaired = this._sanitizeTimeline();
+    if (this._lastRepaired) console.warn(`[project] load: repaired ${this._lastRepaired} overlapping timeline item(s) to keep tracks valid`);
   }
   exportData() {
     const data = this.serialize();
@@ -157,6 +160,40 @@ class Project {
         throw new Error('Track time is already occupied. Put it on another track, or before/after that item.');
       }
     }
+  }
+
+  // STRUCTURAL INVARIANT: no two items may overlap in time on the same track. The editor
+  // enforces this on every live edit, but a hand-edited or wrongly-merged .knx can still
+  // contain overlaps. This repairs them deterministically on load: items are taken in
+  // start-time order and any item that would cross the previous one is rippled forward to
+  // start exactly where the previous item ends (duration preserved, nothing lost, no
+  // silent stacking). Clips and the track's own objects share the track's timeline.
+  // Returns the number of items that had to be moved.
+  _sanitizeTimeline() {
+    let moved = 0;
+    const EPS = 1e-3;
+    for (const track of this.tracks) {
+      const items = [];
+      for (const c of (track.clips || [])) items.push({
+        start: () => c.timelineIn, end: () => c.timelineOut,
+        shift: (d) => { c.timelineIn = +(c.timelineIn + d).toFixed(3); c.timelineOut = +(c.timelineOut + d).toFixed(3); },
+      });
+      for (const o of this.objects) {
+        if (o.trackId !== track.id) continue;   // null / other-track objects don't share this lane
+        items.push({
+          start: () => (o.start || 0), end: () => (o.end || 0),
+          shift: (d) => { o.start = +((o.start || 0) + d).toFixed(3); o.end = +((o.end || 0) + d).toFixed(3); },
+        });
+      }
+      items.sort((a, b) => a.start() - b.start());
+      let cursor = 0;
+      for (const it of items) {
+        if (it.start() < cursor - EPS) { it.shift(cursor - it.start()); moved++; }
+        cursor = it.end();
+      }
+      if (track.clips) track.clips.sort((a, b) => a.timelineIn - b.timelineIn);
+    }
+    return moved;
   }
 
   _coverRect(media, W = this.resolution.w, H = this.resolution.h) {

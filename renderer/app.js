@@ -627,6 +627,10 @@ function duplicateSel(){ if(selection.kind==='clip'){ const c=findClipById(selec
 function deleteSel(){ if(selection.kind==='clip'){ commit('remove_clip',{clipId:selection.id}); select(null); } else if(selection.kind==='object'){ commit('remove_object',{id:selection.id}); select(null); } else if(selection.kind==='multi'){ for(const id of selection.ids) rpc('remove_object',{id}); select(null); } }
 function commit(method,params){ interacting=false; return rpc(method,params).catch(()=>{}); }
 
+function sourceFps(){ // fps of the first video clip's media, so we default to the SOURCE rate
+  for(const t of (state.tracks||[])) for(const c of (t.clips||[])){ const m=state.media[c.mediaId]; if(m&&m.hasVideo&&!m.isImage&&m.fps) return Math.round(m.fps); }
+  return 30;
+}
 function openExportDialog(){
   pause();
   // Pre-select quality that best matches the current project height.
@@ -634,6 +638,9 @@ function openExportDialog(){
   for(const q of qualityOpts){ if(PH<=q){ bestQ=q; break; } }
   const radio=document.querySelector(`input[name="exportQuality"][value="${bestQ}"]`);
   if(radio) radio.checked=true;
+  // Default fps to the source's frame rate — exporting 30fps footage at 60 only duplicates
+  // frames (no smoother motion, bigger file) and blocks the lossless-copy path.
+  if(el('exportFps')) el('exportFps').value=sourceFps();
   el('exportDlgStep1').classList.remove('hidden'); el('exportDlgStep2').classList.add('hidden');
   el('dlgStep1Ind').classList.add('active'); el('dlgStep2Ind').classList.remove('active');
   el('exportDialog').classList.remove('hidden');
@@ -666,7 +673,7 @@ function submitExport(){
   rpc('export',{outPath,fps,quality}).then(r=>setStatus('Export started → '+r.out)).catch(e=>setStatus('⚠ Export failed: '+e.message));
 }
 function saveProject(){ window.kx.saveProjectAs().then(path=>{ if(path) rpc('save_project',{path}).then(r=>setStatus('Project saved → '+r.path)).catch(()=>{}); }); }
-function openProject(){ window.kx.pickProject().then(path=>{ if(path) rpc('load_project',{path}).then(()=>{ select(null); seekTo(0); setStatus('Project opened → '+path); }).catch(()=>{}); }); }
+function openProject(){ window.kx.pickProject().then(path=>{ if(path) rpc('load_project',{path}).then(r=>{ select(null); seekTo(0); const fixed=(r&&r.repaired)||0; setStatus('Project opened → '+path+(fixed?` · ⚠ fixed ${fixed} overlapping item(s) on load`:'')); }).catch(()=>{}); }); }
 
 // ===================================================== ENGINE EVENTS
 function applyState(s){ state=s; if(!state.resolution) state.resolution={w:1280,h:720};
@@ -676,7 +683,7 @@ function applyState(s){ state=s; if(!state.resolution) state.resolution={w:1280,
   fitWorking(); syncResUI();
   renderTabs(); renderSection(); renderTimeline(); renderInspector(); renderLayers(); el('btnUndo').disabled=!s.canUndo; el('btnRedo').disabled=!s.canRedo; if(!playing) seekTo(playhead); }
 window.kx.onState((s)=>{ if(interacting){ pendingState=s; return; } applyState(s); });
-window.kx.onJob((j)=>{ jobs.set(j.id,j); if(activeSection==='media'&&['preview','thumbnail','sample','audio'].includes(j.type)&&j.status==='done') renderSection(); if(j.status==='done'&&j.type==='export'){ setStatus('Export complete → '+(j.result&&j.result.out)); } if(j.status==='canceled'&&j.type==='export'){ setStatus('Export canceled.'); } if(j.status==='error'){ setStatus('⚠ '+j.label+': '+j.error); } });
+window.kx.onJob((j)=>{ jobs.set(j.id,j); if(activeSection==='media'&&['preview','thumbnail','sample','audio'].includes(j.type)&&j.status==='done') renderSection(); if(j.status==='done'&&j.type==='export'){ const ll=j.result&&j.result.lossless; setStatus((ll?'✓ Lossless cut (original quality kept) → ':'Export complete → ')+(j.result&&j.result.out)); } if(j.status==='canceled'&&j.type==='export'){ setStatus('Export canceled.'); } if(j.status==='error'){ setStatus('⚠ '+j.label+': '+j.error); } });
 setInterval(()=>{ if(!interacting&&pendingState){ const s=pendingState; pendingState=null; applyState(s); } },80);
 
 // ===================================================== PREVIEW ZOOM + PAN (Camtasia-style)
@@ -813,14 +820,17 @@ window.kx.onRenderOverlay(async ({ id, fps, total }, report) => {
       }
     }
     octx = savedOctx;
-    const blob = await oc.convertToBlob({ type: 'image/png' });
+    // WebP (lossy q=0.92, with alpha) instead of PNG: the renderer-side encode is far
+    // cheaper than PNG's lossless deflate and the buffers are ~5-10× smaller, so this
+    // single-threaded phase stops being the export bottleneck. Visually lossless for text.
+    const blob = await oc.convertToBlob({ type: 'image/webp', quality: 0.92 });
     const buf = new Uint8Array(await blob.arrayBuffer());
     frames.push(buf);   // structured-cloned over IPC (compact, no JSON bloat)
     // Stream progress back to the export job (throttled to whole-percent changes).
     if (report) { const pct = Math.floor((i + 1) / n * 100); if (pct !== lastPct) { report((i + 1) / n); lastPct = pct; } }
   }
   playhead = savedPH;
-  return { fps: FPS, frames };
+  return { fps: FPS, frames, ext: 'webp' };
 });
 
 populateResProfiles();
