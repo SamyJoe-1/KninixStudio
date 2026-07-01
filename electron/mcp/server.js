@@ -1,11 +1,20 @@
+#!/usr/bin/env node
 'use strict';
-// Kninix Studio MCP server (stdio, JSON-RPC 2.0, newline-delimited).
-// Exposes the editor as MCP *tools* + *resources* so Claude ("Cue") can drive the
-// SAME project the GUI shows. Tool calls are forwarded to the running app's local
-// control server (docs/10). Zero npm deps — the protocol is implemented directly.
+// Kninix Studio MCP server (JSON-RPC 2.0). Exposes the editor as MCP *tools* +
+// *resources* so Claude ("Cue") can drive a project. Zero npm deps — the protocol is
+// implemented directly. Two ways it gets its Engine:
 //
-// Run standalone:        node electron/mcp/server.js
-// Self-test (no GUI):    node electron/mcp/server.js --selftest
+//   • DESKTOP  — attach to the running GUI app's local control server (default).
+//   • HEADLESS — spin up its own in-process Engine, no GUI needed (VPS / server use).
+//
+// Transports:
+//   node electron/mcp/server.js                 stdio, attach to running app  (desktop)
+//   node electron/mcp/server.js --headless      stdio, own in-process Engine  (VPS via SSH/pipe)
+//   node electron/mcp/server.js --http          HTTP+SSE, own in-process Engine (VPS remote)
+//   node electron/mcp/server.js --selftest      in-process protocol self-test (no GUI)
+//
+// Env: KX_HEADLESS=1 (force headless), KX_MCP_TRANSPORT=http, KX_MCP_HOST, KX_MCP_PORT,
+//      KX_MCP_TOKEN (bearer guard for remote HTTP), KX_DATA_DIR, KX_OUT_DIR.
 
 const http = require('http');
 const readline = require('readline');
@@ -213,13 +222,30 @@ async function handleMessage(msg, dispatch) {
   }
 }
 
-// ---- HTTP + SSE transport (fixed port, auto-started by the Electron main process) ----
-// Claude Desktop config:  { "url": "http://127.0.0.1:3333/sse" }
-// Kninix must be running; just keep the app open.
-const MCP_HTTP_PORT = 3333;
+// ---- HTTP + SSE transport ----
+// Desktop: auto-started by the Electron main process on 127.0.0.1 (no auth needed).
+// Headless/VPS: started by `--http`; bind host/port via KX_MCP_HOST/KX_MCP_PORT and,
+// for any non-loopback bind, guard it with KX_MCP_TOKEN (sent as `Authorization: Bearer
+// <token>` or `?token=`). Claude Desktop config:  { "url": "http://HOST:PORT/sse" }
+const MCP_HTTP_PORT = parseInt(process.env.KX_MCP_PORT, 10) || 3333;
 
-function startMcpHttpServer(engine, port) {
+function startMcpHttpServer(engine, port, opts = {}) {
   port = port || MCP_HTTP_PORT;
+  const host = opts.host || process.env.KX_MCP_HOST || '127.0.0.1';
+  const token = opts.token || process.env.KX_MCP_TOKEN || null;
+  const isLoopback = host === '127.0.0.1' || host === 'localhost' || host === '::1';
+  if (!isLoopback && !token) {
+    process.stderr.write('[Kninix-mcp] WARNING: binding ' + host + ' without KX_MCP_TOKEN — ' +
+      'anyone who can reach this port can drive the editor. Set KX_MCP_TOKEN or bind 127.0.0.1 + SSH-tunnel.\n');
+  }
+  const authOk = (req, url) => {
+    if (!token) return true;
+    const hdr = req.headers['authorization'] || '';
+    const bearer = hdr.startsWith('Bearer ') ? hdr.slice(7) : null;
+    const q = url.searchParams.get('token');
+    return bearer === token || q === token;
+  };
+
   const directDispatch = (method, params) => engine.dispatch(method, params);
   const clients = new Map();  // sessionId -> SSE response
   let nextSid = 1;
@@ -230,7 +256,15 @@ function startMcpHttpServer(engine, port) {
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
 
-    const url = new URL(req.url, `http://127.0.0.1:${port}`);
+    const url = new URL(req.url, `http://${host}:${port}`);
+
+    // Health probe for load balancers / systemd / docker HEALTHCHECK (never guarded).
+    if (req.method === 'GET' && url.pathname === '/health') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      return res.end(JSON.stringify({ ok: true, server: SERVER_INFO }));
+    }
+
+    if (!authOk(req, url)) { res.writeHead(401); return res.end('unauthorized'); }
 
     // SSE endpoint: client connects here to receive server→client messages
     if (req.method === 'GET' && url.pathname === '/sse') {
@@ -270,14 +304,15 @@ function startMcpHttpServer(engine, port) {
 
     if (url.pathname === '/') {
       res.writeHead(200, { 'content-type': 'text/plain' });
-      return res.end(`Kninix Studio MCP\nSSE endpoint: http://127.0.0.1:${port}/sse\nAdd to Claude Desktop: { "url": "http://127.0.0.1:${port}/sse" }`);
+      return res.end(`Kninix Studio MCP\nSSE endpoint: http://${host}:${port}/sse\nAdd to Claude Desktop: { "url": "http://${host}:${port}/sse" }`);
     }
 
     res.writeHead(404); res.end('not found');
   });
 
-  server.listen(port, '127.0.0.1', () => {
-    process.stderr.write(`[Kninix-mcp] HTTP+SSE ready → http://127.0.0.1:${port}/sse\n`);
+  server.listen(port, host, () => {
+    process.stderr.write(`[Kninix-mcp] HTTP+SSE ready → http://${host}:${port}/sse` +
+      (token ? ' (token-guarded)' : '') + '\n');
   });
 
   return server;
@@ -298,6 +333,21 @@ function startStdioLoop() {
     send(await handleMessage(msg));
   });
   process.stderr.write('[Kninix-mcp] ready on stdio\n');
+}
+
+// ---- headless: create our own in-process Engine (no GUI, no control file) ----
+// This is what makes the server runnable on a VPS. The Engine is pure Node + ffmpeg;
+// only overlay/caption baking on export needs the GUI renderer (absent here), so
+// headless exports render clips + filters + transitions + lossless trims via ffmpeg.
+function createStandaloneEngine() {
+  const { Engine } = require('../core/engine');
+  const engine = new Engine({
+    dataDir: process.env.KX_DATA_DIR || undefined,
+    outDir: process.env.KX_OUT_DIR || undefined,
+    maxConcurrent: parseInt(process.env.KX_MAX_CONCURRENT, 10) || 4,
+  });
+  setDispatcher((method, params) => engine.dispatch(method, params));
+  return engine;
 }
 
 // ---- self-test: in-process engine, exercise the protocol end-to-end ----
@@ -352,8 +402,24 @@ function waitJobs(engine, timeoutMs = 60000) {
 }
 
 if (require.main === module) {
-  if (process.argv.includes('--selftest')) selftest().catch(e => { console.error('SELFTEST FAIL:', e); process.exit(1); });
-  else startStdioLoop();
+  const argv = process.argv.slice(2);
+  const wantHttp = argv.includes('--http') || process.env.KX_MCP_TRANSPORT === 'http';
+  const wantHeadless = argv.includes('--headless') || process.env.KX_HEADLESS === '1' || wantHttp;
+
+  if (argv.includes('--selftest')) {
+    selftest().catch(e => { console.error('SELFTEST FAIL:', e); process.exit(1); });
+  } else if (wantHttp) {
+    // Networked headless mode: own Engine, served over HTTP+SSE (for remote MCP clients).
+    const engine = createStandaloneEngine();
+    startMcpHttpServer(engine, MCP_HTTP_PORT);
+  } else if (wantHeadless) {
+    // Headless stdio mode: own Engine, no GUI (e.g. Claude Desktop launching over SSH).
+    createStandaloneEngine();
+    startStdioLoop();
+  } else {
+    // Desktop mode: attach over HTTP to the already-running GUI app's control server.
+    startStdioLoop();
+  }
 }
 
-module.exports = { handleMessage, setDispatcher, TOOLS, RESOURCES, startMcpHttpServer, MCP_HTTP_PORT };
+module.exports = { handleMessage, setDispatcher, TOOLS, RESOURCES, startMcpHttpServer, MCP_HTTP_PORT, createStandaloneEngine };

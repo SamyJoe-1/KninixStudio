@@ -1,0 +1,33 @@
+# systemd unit for the Kninix Studio headless MCP server (HTTP+SSE).
+# Install:
+#   sudo cp deploy/kninix-mcp.service /etc/systemd/system/
+#   sudo cp .env.example /etc/kninix/kninix.env   # then edit secrets
+#   sudo systemctl daemon-reload && sudo systemctl enable --now kninix-mcp
+# Logs:  journalctl -u kninix-mcp -f
+
+[Unit]
+Description=Kninix Studio headless MCP server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Adjust to where you cloned the repo and which user should own the process.
+WorkingDirectory=/opt/kninix_studio
+ExecStart=/usr/bin/node electron/mcp/server.js --http
+EnvironmentFile=/etc/kninix/kninix.env
+Restart=on-failure
+RestartSec=3
+
+# Hardening — the process only needs its data dir writable.
+User=kninix
+Group=kninix
+StateDirectory=kninix
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/kninix
+
+[Install]
+WantedBy=multi-user.target

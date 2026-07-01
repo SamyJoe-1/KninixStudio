@@ -1,0 +1,13 @@
+node_modules
+.git
+.gitignore
+logs
+*.log
+dist
+out
+.DS_Store
+Dockerfile
+.dockerignore
+.env
+*.knx
+data

@@ -4,13 +4,21 @@
   "private": true,
   "description": "Kninix Studio - AI-native, multi-process desktop video editor (MVP)",
   "main": "electron/main.js",
+  "bin": {
+    "kninix-mcp": "electron/mcp/server.js"
+  },
   "scripts": {
     "start": "electron .",
     "mcp": "node electron/mcp/server.js",
+    "mcp:headless": "node electron/mcp/server.js --headless",
+    "mcp:http": "node electron/mcp/server.js --http",
     "mcp:selftest": "node electron/mcp/server.js --selftest",
     "test": "node scripts/test-core.js && node scripts/test-mcp.js",
     "test:core": "node scripts/test-core.js",
     "test:mcp": "node scripts/test-mcp.js"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "devDependencies": {
     "electron": "^42.4.1"

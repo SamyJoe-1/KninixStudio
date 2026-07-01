@@ -1,14 +1,21 @@
 {
-  "//": "Claude Desktop MCP config for Kninix Studio.",
-  "//1": "1) Start the editor first:  npm start   (it advertises a localhost control server).",
-  "//2": "2) Merge the block below into claude_desktop_config.json (Settings > Developer > Edit Config).",
-  "//3": "3) Replace the cwd path with the absolute path to this project on your machine.",
-  "//4": "4) Restart Claude Desktop. Then ask: 'generate a 5s sample, add it to the timeline, and export.'",
+  "//": "Claude Desktop MCP config for Kninix Studio. Pick ONE server block below.",
+  "//desktop": "DESKTOP: start the editor first (npm start); the sidecar attaches to the running app. Replace cwd with this project's absolute path.",
+  "//headless": "HEADLESS/VPS (local): no GUI needed; the server runs its own engine. Replace cwd with this project's absolute path.",
+  "//remote": "REMOTE VPS over HTTP: run `npm run mcp:http` on the VPS, tunnel with `ssh -L 3333:127.0.0.1:3333 user@vps`, then use the url block. See DEPLOY.md.",
   "mcpServers": {
-    "Kninix-studio": {
+    "Kninix-desktop": {
       "command": "node",
       "args": ["electron/mcp/server.js"],
-      "cwd": "C:\\Users\\pc\\video_editor"
+      "cwd": "C:\\Users\\pc\\kninix_studio"
+    },
+    "Kninix-headless": {
+      "command": "node",
+      "args": ["electron/mcp/server.js", "--headless"],
+      "cwd": "C:\\Users\\pc\\kninix_studio"
+    },
+    "Kninix-remote": {
+      "url": "http://127.0.0.1:3333/sse"
     }
   }
 }

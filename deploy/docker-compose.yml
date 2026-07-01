@@ -1,0 +1,23 @@
+# Kninix Studio headless MCP over HTTP+SSE.
+# Usage:  cp ../.env.example .env  (edit KX_MCP_TOKEN)  &&  docker compose up -d --build
+services:
+  kninix-mcp:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    ports:
+      # Bind to loopback on the host and SSH-tunnel in, OR expose publicly ONLY with a
+      # token set. To expose publicly change to "3333:3333".
+      - "127.0.0.1:3333:3333"
+    environment:
+      KX_MCP_TRANSPORT: http
+      KX_MCP_HOST: 0.0.0.0        # inside the container; the host port mapping controls exposure
+      KX_MCP_PORT: "3333"
+      # KX_MCP_TOKEN: set-me-if-exposed-publicly
+      KX_ENCODER: libx264          # CPU-only VPS default
+    volumes:
+      - kninix-data:/data
+    restart: unless-stopped
+
+volumes:
+  kninix-data:
