@@ -117,6 +117,14 @@ const TOOLS = [
   { name: 'export', method: 'export',
     description: 'Export the timeline to an MP4. Runs as a background job; returns a jobId.',
     inputSchema: { type: 'object', properties: { name: { type: 'string' } } } },
+  { name: 'save_project', method: 'save_project',
+    description: 'Save the current project as a .knx file at an absolute path (created if missing; .knx appended if absent).',
+    inputSchema: { type: 'object', required: ['path'], properties: {
+      path: { type: 'string', description: 'Absolute output path, e.g. /var/lib/kninix/exports/my.knx' } } } },
+  { name: 'load_project', method: 'load_project',
+    description: 'Load a .knx/.json project file from an absolute path, replacing the current project.',
+    inputSchema: { type: 'object', required: ['path'], properties: {
+      path: { type: 'string', description: 'Absolute path to a .knx or .json project file.' } } } },
   { name: 'list_jobs', method: 'list_jobs',
     description: 'List background jobs (sample/thumbnail/export) with status and progress.',
     inputSchema: { type: 'object', properties: {} } },

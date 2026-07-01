@@ -245,6 +245,30 @@ function colorHex(c, fallback = 'FFFFFF') {
   return '0x' + (m ? m[1] : fallback);
 }
 
+// drawtext needs a real font file. GUI/desktop has system fonts via fontconfig, but a
+// minimal headless VPS often has none → "Cannot find a valid font". Resolve one explicitly:
+// KX_FONT env wins, else the first bundled/common font that exists. Returns a `fontfile=...:`
+// fragment to prepend to a drawtext filter, or '' to let fontconfig try its default.
+let _fontCache;
+function fontArg() {
+  if (_fontCache !== undefined) return _fontCache;
+  const candidates = [
+    process.env.KX_FONT,
+    '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+    '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+    '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf',
+    'C:/Windows/Fonts/arialbd.ttf',
+    'C:/Windows/Fonts/arial.ttf',
+  ].filter(Boolean);
+  let found = '';
+  for (const c of candidates) {
+    try { if (fs.existsSync(c)) { found = c; break; } } catch (_) {}
+  }
+  // Escape for the filtergraph: backslashes and colons (e.g. Windows "C:\...").
+  _fontCache = found ? `fontfile='${found.replace(/\\/g, '/').replace(/:/g, '\\:')}':` : '';
+  return _fontCache;
+}
+
 // Camtasia-style timeline compositor. ONE ffmpeg pass:
 //   * a black canvas spanning 0 -> total timeline length (gaps render as black),
 //   * every clip on EVERY track placed at its ABSOLUTE timelineIn (not concatenated),
@@ -370,6 +394,7 @@ async function exportTimeline(project, outPath, { signal, onProgress, overlay, f
     fc.push(`[${last}][ovfmt]overlay=0:0:format=auto:eof_action=repeat,${scaleOv}format=yuv420p${tail}[vout]`);
   } else {
     // ── FFmpeg-filter fallback (no renderer, or no objects) ─────────────────
+    const FONT = fontArg();
     objects.forEach(({ o }, k) => {
       const out = `obj${k}`;
       const x = Math.round(o.x || 0), y = Math.round(o.y || 0);
@@ -380,7 +405,7 @@ async function exportTimeline(project, outPath, { signal, onProgress, overlay, f
       if (o.type === 'text') {
         const fs = Math.max(8, Math.round(o.fontSize || 72));
         const alignX = o.align === 'left' ? x : (o.align === 'right' ? `${x+w}-text_w` : `${x}+((${w}-text_w)/2)`);
-        fc.push(`[${last}]drawtext=text='${escText(o.text)}':x=${alignX}:y=${y}:fontsize=${fs}:fontcolor=${colorHex(o.color)}:${enable}[${out}]`);
+        fc.push(`[${last}]drawtext=${FONT}text='${escText(o.text)}':x=${alignX}:y=${y}:fontsize=${fs}:fontcolor=${colorHex(o.color)}:${enable}[${out}]`);
       } else if (o.type === 'caption') {
         // Simplified fallback: full caption text with stroke+shadow, no word animation
         const fs = Math.max(8, Math.round(o.fontSize || 88));
@@ -389,11 +414,11 @@ async function exportTimeline(project, outPath, { signal, onProgress, overlay, f
         const bc  = colorHex(o.strokeColor || '#000000', '000000');
         const sx  = Math.round(o.shadowOffsetX || 2), sy = Math.round(o.shadowOffsetY || 3);
         const sc  = colorHex(o.shadowColor || '#000000', '000000');
-        fc.push(`[${last}]drawtext=text='${escText(o.text)}':x=${cx}:y=${y}:fontsize=${fs}:fontcolor=${colorHex(o.color)}:borderw=${bw}:bordercolor=${bc}:shadowx=${sx}:shadowy=${sy}:shadowcolor=${sc}:${enable}[${out}]`);
+        fc.push(`[${last}]drawtext=${FONT}text='${escText(o.text)}':x=${cx}:y=${y}:fontsize=${fs}:fontcolor=${colorHex(o.color)}:borderw=${bw}:bordercolor=${bc}:shadowx=${sx}:shadowy=${sy}:shadowcolor=${sc}:${enable}[${out}]`);
       } else if (o.type === 'widget') {
         const text = escText(o.title || o.widget || '');
         const fs = Math.max(8, Math.round(o.fontSize || 48));
-        fc.push(`[${last}]drawtext=text='${text}':x=${x}+((${w}-text_w)/2):y=${y}+((${h}-text_h)/2):fontsize=${fs}:fontcolor=${colorHex(o.color)}:${enable}[${out}]`);
+        fc.push(`[${last}]drawtext=${FONT}text='${text}':x=${x}+((${w}-text_w)/2):y=${y}+((${h}-text_h)/2):fontsize=${fs}:fontcolor=${colorHex(o.color)}:${enable}[${out}]`);
       } else {
         fc.push(`[${last}]drawbox=x=${x}:y=${y}:w=${w}:h=${h}:color=${colorHex(o.color,'6C5CE7')}@${o.opacity!=null?o.opacity:1}:t=fill:${enable}[${out}]`);
       }
